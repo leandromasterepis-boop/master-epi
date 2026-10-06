@@ -82,6 +82,20 @@ const STORAGE_PED_V2 = "pedidos_v2";
 const STORAGE_SOL_V2 = "solicitacoes_v1";
 const STORAGE_CAL_V1 = "calendario_compras_v1";
 const DEFAULT_SHEETS_URL="https://script.google.com/macros/s/AKfycbyeeRKy-2I7m80eiD21lFTd77nOuRC66VmMuT_5B1hm0P0N9eSkGnXHGqHaJMmUfADeCw/exec";
+const STORAGE_CACHE_VERSION = "masterepi_cache_version_v1";
+const DATA_CACHE_VERSION = "cloud-first-2026-10-06-v1";
+
+// O localStorage é somente cache. Ao publicar uma versão incompatível,
+// removemos automaticamente os dados locais antigos, sem apagar a URL da nuvem.
+(function migrateLocalCache(){
+  try{
+    if(localStorage.getItem(STORAGE_CACHE_VERSION)!==DATA_CACHE_VERSION){
+      [STORAGE_NF,STORAGE_FR,STORAGE_PED_V2,STORAGE_SOL_V2,STORAGE_CAL_V1]
+        .forEach(k=>localStorage.removeItem(k));
+      localStorage.setItem(STORAGE_CACHE_VERSION,DATA_CACHE_VERSION);
+    }
+  }catch(e){ console.warn("Não foi possível atualizar o cache local",e); }
+})();
 
 async function cloudSave(key, value){
   const url=localStorage.getItem(STORAGE_SHEETS_URL)||DEFAULT_SHEETS_URL;
@@ -1289,31 +1303,33 @@ function App(){
   useEffect(()=>{
     setDataLoaded(false);
     async function init(){
-      let localNfs=[], localFr=[];
-      try{const s=localStorage.getItem(STORAGE_NF);if(s){const d=JSON.parse(s);if(Array.isArray(d)&&d.length>0)localNfs=d;}}catch{}
-      try{const s=localStorage.getItem(STORAGE_FR);if(s){const d=JSON.parse(s);if(Array.isArray(d)&&d.length>0)localFr=d;}}catch{}
-
-      if(localNfs.length>0)setNfs(localNfs);
-      if(localFr.length>0)setFretes(localFr);
-
+      // Cloud-first: somente usa localStorage se a nuvem estiver indisponível.
+      let cloudNfs=null, cloudFr=null;
       if(sheetsUrl){
         setSyncStatus("syncing");setSyncMsg("Sincronizando com a nuvem...");
         try{
-          const [cnf,cfr]=await Promise.all([cloudLoad(STORAGE_NF),cloudLoad(STORAGE_FR)]);
-          // Com a nuvem conectada, ela é a fonte principal. O localStorage é apenas cache.
-          if(cnf&&Array.isArray(cnf)){
-            setNfs(cnf);
-            try{localStorage.setItem(STORAGE_NF,JSON.stringify(cnf));}catch{}
+          [cloudNfs,cloudFr]=await Promise.all([cloudLoad(STORAGE_NF),cloudLoad(STORAGE_FR)]);
+          if(Array.isArray(cloudNfs)){
+            setNfs(cloudNfs);
+            try{localStorage.setItem(STORAGE_NF,JSON.stringify(cloudNfs));}catch{}
           }
-          if(cfr&&Array.isArray(cfr)){
-            setFretes(cfr);
-            try{localStorage.setItem(STORAGE_FR,JSON.stringify(cfr));}catch{}
+          if(Array.isArray(cloudFr)){
+            setFretes(cloudFr);
+            try{localStorage.setItem(STORAGE_FR,JSON.stringify(cloudFr));}catch{}
           }
           setSyncStatus("ok");setSyncMsg("Sincronizado ✓");
         }catch{
           setSyncStatus("error");setSyncMsg("⚠️ Nuvem indisponível — usando dados locais");
         }
         setTimeout(()=>{setSyncStatus("idle");setSyncMsg("");},4000);
+      }
+
+      // Fallback somente quando a API não retornou um array.
+      if(!Array.isArray(cloudNfs)){
+        try{const s=localStorage.getItem(STORAGE_NF);if(s){const d=JSON.parse(s);if(Array.isArray(d))setNfs(d);}}catch{}
+      }
+      if(!Array.isArray(cloudFr)){
+        try{const s=localStorage.getItem(STORAGE_FR);if(s){const d=JSON.parse(s);if(Array.isArray(d))setFretes(d);}}catch{}
       }
       setDataLoaded(true);
     }
