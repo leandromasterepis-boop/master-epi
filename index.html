@@ -2177,7 +2177,10 @@ function PedidosTab({sheetsUrl, nfs, setNfs, fretes, setFretes, navegarParaNF, h
   const NfField=({g})=>{
     const[ed,setEd]=useState(false);
     const[draft,setDraft]=useState(g.nf||"");
-    const nfVinc=nfs&&g.nf?nfs.find(n=>n.numero.trim()===g.nf.trim()):null;
+    const nfVinc=nfs&&g.nf?nfs.find(n=>{
+      const a=String(n.numero||"").trim(), b=String(g.nf||"").trim();
+      return a===b || a.split("/")[0].trim()===b.split("/")[0].trim();
+    }):null;
     const frVinc=fretes&&g.nf?fretes.find(f=>f.nfAssociada&&f.nfAssociada.trim()===g.nf.trim()):null;
 
     const salvar=(v)=>{
@@ -2392,6 +2395,21 @@ function PedidosTab({sheetsUrl, nfs, setNfs, fretes, setFretes, navegarParaNF, h
                           </a>
                         )}
                       </div>
+                      {g.nf&&(()=>{
+                        const nfRelacionada=nfs&&nfs.find(n=>{
+                          const a=String(n.numero||"").trim(), b=String(g.nf||"").trim();
+                          return a===b || a.split("/")[0].trim()===b.split("/")[0].trim();
+                        });
+                        return(
+                          <div style={{marginBottom:14,padding:"10px 12px",borderRadius:8,border:`1px solid ${nfRelacionada?"#0891b2":"#7f1d1d"}`,background:nfRelacionada?"#0c2a3a":"#1c0808"}}>
+                            <div style={{fontSize:11,fontWeight:700,color:nfRelacionada?"#67e8f9":"#fca5a5",marginBottom:4}}>
+                              {nfRelacionada?"🔗 Cotação relacionada à NF-e":"⚠️ NF informada, mas ainda não encontrada na aba NF-e"}
+                            </div>
+                            <div style={{fontSize:12,color:"#e2e8f0"}}>NF: <b>{g.nf}</b>{nfRelacionada&&<> · Fornecedor: {nfRelacionada.emitente||"—"} · Emissão: {nfRelacionada.emissao||"—"} · Valor: {nfRelacionada.valor||"—"}</>}</div>
+                            {nfRelacionada&&<button onClick={()=>navegarParaNF(nfRelacionada.numero)} style={{marginTop:7,background:"#164e63",border:"1px solid #0891b2",borderRadius:5,padding:"4px 9px",color:"#a5f3fc",fontSize:11,cursor:"pointer"}}>Abrir NF-e relacionada ↗</button>}
+                          </div>
+                        );
+                      })()}
                       {(()=>{
                         const editandoItens=expandidos[g._gid+"_itens"];
                         const toggleEditItens=()=>setExpandidos(p=>({...p,[g._gid+"_itens"]:!p[g._gid+"_itens"]}));
