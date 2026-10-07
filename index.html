@@ -2074,10 +2074,11 @@ function PedidosTab({sheetsUrl, nfs, setNfs, fretes, setFretes, navegarParaNF, h
     if(g.chegouDia)return{label:"✅ Recebido",color:"#4ade80",bg:"#052e16",border:"#16a34a"};
     const nfVinc=nfs&&g.nf?nfs.find(n=>n.numero.trim()===g.nf.trim()||(n.numero.split("/")[0].trim()===g.nf.split("/")[0].trim())):null;
     const frVinc=fretes&&g.nf?fretes.find(f=>f.nfAssociada&&f.nfAssociada.trim()===g.nf.trim()):null;
-    if(g.nf)return{label:"📄 Faturado — aguardando chegar",color:"#67e8f9",bg:"#0c2a3a",border:"#0891b2"};
+    if(g.faturouDia&&g.nf)return{label:"📄 Faturado — aguardando chegar",color:"#67e8f9",bg:"#0c2a3a",border:"#0891b2"};
     if(frVinc)return{label:"🚚 Frete em trânsito",color:"#a78bfa",bg:"#1a0a2a",border:"#7c3aed"};
     if(nfVinc)return{label:"📄 NF-e vinculada",color:"#67e8f9",bg:"#0c2a3a",border:"#0891b2"};
-    if(g.faturouDia)return{label:"🔄 Faturando — aguard. NF",color:"#fbbf24",bg:"#1c1200",border:"#ca8a04"};
+    if(g.faturouDia&&!g.nf)return{label:"⚠️ Faturado — falta NF",color:"#f59e0b",bg:"#1c1200",border:"#ca8a04"};
+    if(g.nf&&!g.faturouDia)return{label:"⚠️ NF informada — falta data",color:"#f59e0b",bg:"#1c1200",border:"#ca8a04"};
     if(g.numeroPedido)return{label:"⏳ Aguard. NF",color:"#f87171",bg:"#1a0000",border:"#cc0000"};
     if(g.dataAprovacao)return{label:"📤 Aguard. envio pedido",color:"#fb923c",bg:"#1c0a00",border:"#ea580c"};
     if(g.cotacaoArquivo||g.linkCotacao||g.numCotacao)return{label:"⏳ Pendente de faturamento",color:"#fbbf24",bg:"#1c1200",border:"#ca8a04"};
@@ -2088,10 +2089,10 @@ function PedidosTab({sheetsUrl, nfs, setNfs, fretes, setFretes, navegarParaNF, h
   const tFat=(g)=>{if(!g.dataAprovacao)return null;if(g.faturouDia)return diffDays(g.dataAprovacao,g.faturouDia);return diasAberto(g.dataAprovacao);};
   const tEnt=(g)=>{if(!g.faturouDia)return null;if(g.chegouDia)return diffDays(g.faturouDia,g.chegouDia);return diasAberto(g.faturouDia);};
 
-  const abertos=grupos.filter(g=>!g.nf&&!g.chegouDia);
-  const faturados=grupos.filter(g=>!!g.nf&&!g.chegouDia);
+  const abertos=grupos.filter(g=>(!g.faturouDia||!g.nf)&&!g.chegouDia);
+  const aguardando=grupos.filter(g=>!!g.faturouDia&&!!g.nf&&!g.chegouDia);
   const finalizados=grupos.filter(g=>!!g.chegouDia);
-  const listaAtual=sub==="abertos"?abertos:(sub==="faturados"?faturados:finalizados);
+  const listaAtual=sub==="abertos"?abertos:(sub==="aguardando"?aguardando:finalizados);
   const filtrados=listaAtual.filter(g=>{
     if(!search)return true;
     const s=search.toLowerCase();
@@ -2177,10 +2178,7 @@ function PedidosTab({sheetsUrl, nfs, setNfs, fretes, setFretes, navegarParaNF, h
   const NfField=({g})=>{
     const[ed,setEd]=useState(false);
     const[draft,setDraft]=useState(g.nf||"");
-    const nfVinc=nfs&&g.nf?nfs.find(n=>{
-      const a=String(n.numero||"").trim(), b=String(g.nf||"").trim();
-      return a===b || a.split("/")[0].trim()===b.split("/")[0].trim();
-    }):null;
+    const nfVinc=nfs&&g.nf?nfs.find(n=>n.numero.trim()===g.nf.trim()):null;
     const frVinc=fretes&&g.nf?fretes.find(f=>f.nfAssociada&&f.nfAssociada.trim()===g.nf.trim()):null;
 
     const salvar=(v)=>{
@@ -2251,15 +2249,25 @@ function PedidosTab({sheetsUrl, nfs, setNfs, fretes, setFretes, navegarParaNF, h
       <CalendarioCompras grupos={grupos} sheetsUrl={sheetsUrl}/>
 
       <div style={{display:"flex",gap:12,marginBottom:20,flexWrap:"wrap"}}>
-        {[["📦","Em Aberto","#fbbf24",abertos.length],["✅","Recebidos","#34d399",finalizados.length],["📋","Total","#fff",grupos.length],["📄","Faturados","#67e8f9",faturados.length]].map(([ic,lb,cl,ct])=>(
+        {[["📦","Em Aberto","#fbbf24",abertos.length],["📄","Aguardando Chegar","#67e8f9",aguardando.length],["✅","Recebidos","#34d399",finalizados.length],["📋","Total","#fff",grupos.length]].map(([ic,lb,cl,ct])=>(
           <div key={lb} style={{background:"#141414",borderRadius:8,padding:"10px 18px",display:"flex",alignItems:"center",gap:8,border:"1px solid #2a2a2a"}}>
             <span>{ic}</span><span style={{fontSize:13,color:"#94a3b8"}}>{lb}</span><span style={{fontWeight:700,fontSize:20,color:cl}}>{ct}</span>
           </div>
         ))}
       </div>
 
+      <div style={{background:"linear-gradient(135deg,#141414,#0b0b0b)",border:"1px solid #2a2a2a",borderRadius:10,padding:"12px 16px",marginBottom:14}}>
+        <div style={{color:"#e2e8f0",fontSize:12,fontWeight:700,marginBottom:10}}>📊 Resumo das cotações</div>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+          <div style={{color:"#fbbf24",fontSize:12}}>Em aberto: <b>{abertos.length}</b></div>
+          <div style={{color:"#67e8f9",fontSize:12}}>Aguardando chegar: <b>{aguardando.length}</b></div>
+          <div style={{color:"#34d399",fontSize:12}}>Recebidas: <b>{finalizados.length}</b></div>
+          <div style={{color:"#f59e0b",fontSize:12}}>Falta NF: <b>{grupos.filter(g=>!!g.faturouDia&&!g.nf&&!g.chegouDia).length}</b></div>
+          <div style={{color:"#f59e0b",fontSize:12}}>Falta data: <b>{grupos.filter(g=>!!g.nf&&!g.faturouDia&&!g.chegouDia).length}</b></div>
+        </div>
+      </div>
       <div style={{display:"flex",gap:2,borderBottom:"1px solid #2a2a2a",marginBottom:14}}>
-        {[["abertos","⏳ Pendente faturamento",abertos.length,"#fbbf24"],["faturados","📄 Faturados / aguardando chegar",faturados.length,"#67e8f9"],["finalizados","✅ Recebidos",finalizados.length,"#34d399"],["solicitacoes","📋 Solicitações",solicitacoes.length,"#a78bfa"]].map(([id,lb,ct,cor])=>(
+        {[["abertos","⏳ Cotações em aberto",abertos.length,"#fbbf24"],["aguardando","📄 Aguardando Chegar",aguardando.length,"#67e8f9"],["finalizados","✅ Recebidos",finalizados.length,"#34d399"],["solicitacoes","📋 Solicitações",solicitacoes.length,"#a78bfa"]].map(([id,lb,ct,cor])=>(
           <button key={id} onClick={()=>setSub(id)} style={{padding:"7px 18px",border:"none",borderRadius:"6px 6px 0 0",cursor:"pointer",fontWeight:600,fontSize:13,background:sub===id?"#0a0a0a":"transparent",color:sub===id?cor:"#555",borderBottom:sub===id?`2px solid ${cor}`:"2px solid transparent"}}>
             {lb} <span style={{background:cor,color:"#000",borderRadius:10,padding:"1px 7px",fontSize:11,marginLeft:4,fontWeight:700}}>{ct}</span>
           </button>
@@ -2317,7 +2325,7 @@ function PedidosTab({sheetsUrl, nfs, setNfs, fretes, setFretes, navegarParaNF, h
         filtrados.length===0?(
           <div style={{textAlign:"center",padding:"50px 20px",color:"#475569"}}>
             <div style={{fontSize:44}}>📦</div>
-            <p style={{marginTop:10,fontSize:14}}>{sub==="abertos"?"Nenhuma cotação pendente de faturamento.":sub==="faturados"?"Nenhum pedido faturado aguardando chegada.":"Nenhum pedido recebido ainda."}</p>
+            <p style={{marginTop:10,fontSize:14}}>{sub==="abertos"?"Nenhuma cotação pendente de faturamento.":sub==="aguardando"?"Nenhum pedido faturado aguardando chegada.":"Nenhum pedido recebido ainda."}</p>
             {sub==="abertos"&&<button onClick={()=>setShowModal(true)} style={{marginTop:14,background:"#cc0000",color:"#fff",border:"none",borderRadius:8,padding:"9px 22px",cursor:"pointer",fontWeight:700,fontSize:13}}>➕ Criar primeiro pedido</button>}
           </div>
         ):(
@@ -2395,21 +2403,6 @@ function PedidosTab({sheetsUrl, nfs, setNfs, fretes, setFretes, navegarParaNF, h
                           </a>
                         )}
                       </div>
-                      {g.nf&&(()=>{
-                        const nfRelacionada=nfs&&nfs.find(n=>{
-                          const a=String(n.numero||"").trim(), b=String(g.nf||"").trim();
-                          return a===b || a.split("/")[0].trim()===b.split("/")[0].trim();
-                        });
-                        return(
-                          <div style={{marginBottom:14,padding:"10px 12px",borderRadius:8,border:`1px solid ${nfRelacionada?"#0891b2":"#7f1d1d"}`,background:nfRelacionada?"#0c2a3a":"#1c0808"}}>
-                            <div style={{fontSize:11,fontWeight:700,color:nfRelacionada?"#67e8f9":"#fca5a5",marginBottom:4}}>
-                              {nfRelacionada?"🔗 Cotação relacionada à NF-e":"⚠️ NF informada, mas ainda não encontrada na aba NF-e"}
-                            </div>
-                            <div style={{fontSize:12,color:"#e2e8f0"}}>NF: <b>{g.nf}</b>{nfRelacionada&&<> · Fornecedor: {nfRelacionada.emitente||"—"} · Emissão: {nfRelacionada.emissao||"—"} · Valor: {nfRelacionada.valor||"—"}</>}</div>
-                            {nfRelacionada&&<button onClick={()=>navegarParaNF(nfRelacionada.numero)} style={{marginTop:7,background:"#164e63",border:"1px solid #0891b2",borderRadius:5,padding:"4px 9px",color:"#a5f3fc",fontSize:11,cursor:"pointer"}}>Abrir NF-e relacionada ↗</button>}
-                          </div>
-                        );
-                      })()}
                       {(()=>{
                         const editandoItens=expandidos[g._gid+"_itens"];
                         const toggleEditItens=()=>setExpandidos(p=>({...p,[g._gid+"_itens"]:!p[g._gid+"_itens"]}));
