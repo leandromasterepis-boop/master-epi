@@ -2085,6 +2085,20 @@ function PedidosTab({sheetsUrl, nfs, setNfs, fretes, setFretes, navegarParaNF, h
     return{label:"⏳ Novo",color:"#555",bg:"#111",border:"#222"};
   };
 
+  const alertaChegada=(g)=>{
+    if(g.chegouDia)return null;
+    const fr=fretes&&g.nf?fretes.find(f=>f.nfAssociada&&String(f.nfAssociada).trim()===String(g.nf).trim()):null;
+    const raw=g.previsaoChegada||fr?.previsao;
+    if(!raw)return null;
+    const m=String(raw).match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    const dt=m?new Date(Number(m[3]),Number(m[2])-1,Number(m[1])):new Date(raw);
+    if(isNaN(dt.getTime()))return null;
+    const hoje=new Date();hoje.setHours(0,0,0,0);dt.setHours(0,0,0,0);
+    const dias=Math.ceil((dt-hoje)/86400000);
+    if(dias<0)return{label:`🚨 Chegada atrasada há ${Math.abs(dias)} dia(s)`,color:"#fca5a5",bg:"#450a0a",border:"#dc2626"};
+    if(dias<=3)return{label:`⚠️ Chegada em ${dias} dia(s)`,color:"#fde68a",bg:"#451a03",border:"#f59e0b"};
+    return null;
+  };
   const tCot=(g)=>{if(!g.dataPedido)return null;if(g.dataAprovacao)return diffDays(g.dataPedido,g.dataAprovacao);return diasAberto(g.dataPedido);};
   const tFat=(g)=>{if(!g.dataAprovacao)return null;if(g.faturouDia)return diffDays(g.dataAprovacao,g.faturouDia);return diasAberto(g.dataAprovacao);};
   const tEnt=(g)=>{if(!g.faturouDia)return null;if(g.chegouDia)return diffDays(g.faturouDia,g.chegouDia);return diasAberto(g.faturouDia);};
@@ -2332,6 +2346,7 @@ function PedidosTab({sheetsUrl, nfs, setNfs, fretes, setFretes, navegarParaNF, h
           <div>
             {filtrados.map((g)=>{
               const st=getStatus(g);
+              const alerta=alertaChegada(g);
               const tc=tCot(g),tf=tFat(g),te=tEnt(g);
               const exp=expandidos[g._gid];
               return(
@@ -2373,6 +2388,7 @@ function PedidosTab({sheetsUrl, nfs, setNfs, fretes, setFretes, navegarParaNF, h
                       {te!==null&&<div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:1}}><span style={{fontSize:9,color:"#475569"}}>⏱Entrega</span>{g.chegouDia?<span style={{background:"#0f2922",border:"1px solid #10b981",borderRadius:6,padding:"3px 9px",color:"#34d399",fontWeight:700,fontSize:12}}>{te}d ✓</span>:<DiasBadge dias={te}/>}</div>}
                     </div>
                     <span style={{background:st.bg,border:`1px solid ${st.border}`,borderRadius:6,padding:"4px 10px",color:st.color,fontWeight:700,fontSize:11,whiteSpace:"nowrap",flexShrink:0}}>{st.label}</span>
+                    {alerta&&<span style={{background:alerta.bg,border:`1px solid ${alerta.border}`,borderRadius:6,padding:"4px 10px",color:alerta.color,fontWeight:700,fontSize:11,whiteSpace:"nowrap",flexShrink:0}}>{alerta.label}</span>}
                     <button onClick={()=>{if(confirm(`Remover pedido ${g.fornecedor}?`))setGrupos(prev=>prev.filter(x=>x._gid!==g._gid));}}
                       style={{background:"transparent",border:"1px solid #3a1a1a",borderRadius:6,color:"#cc0000",padding:"4px 8px",cursor:"pointer",fontSize:11,flexShrink:0}}>🗑️</button>
                   </div>
@@ -2403,6 +2419,19 @@ function PedidosTab({sheetsUrl, nfs, setNfs, fretes, setFretes, navegarParaNF, h
                           </a>
                         )}
                       </div>
+                      {g.nf&&(()=>{
+                        const nfRelacionada=nfs&&nfs.find(n=>{
+                          const a=String(n.numero||"").trim(), b=String(g.nf||"").trim();
+                          return a===b || a.split("/")[0].trim()===b.split("/")[0].trim();
+                        });
+                        return(
+                          <div style={{marginBottom:14,padding:"10px 12px",borderRadius:8,border:`1px solid ${nfRelacionada?"#0891b2":"#7f1d1d"}`,background:nfRelacionada?"#0c2a3a":"#1c0808"}}>
+                            <div style={{fontSize:11,fontWeight:700,color:nfRelacionada?"#67e8f9":"#fca5a5",marginBottom:4}}>{nfRelacionada?"🔗 Cotação relacionada à NF-e":"⚠️ NF informada, mas ainda não encontrada na aba NF-e"}</div>
+                            <div style={{fontSize:12,color:"#e2e8f0"}}>NF: <b>{g.nf}</b>{nfRelacionada&&<> · Fornecedor: {nfRelacionada.emitente||"—"} · Emissão: {nfRelacionada.emissao||"—"} · Valor: {nfRelacionada.valor||"—"}</>}</div>
+                            {nfRelacionada&&<button onClick={()=>navegarParaNF(nfRelacionada.numero)} style={{marginTop:7,background:"#164e63",border:"1px solid #0891b2",borderRadius:5,padding:"4px 9px",color:"#a5f3fd",fontSize:11,cursor:"pointer"}}>Abrir NF-e relacionada ↗</button>}
+                          </div>
+                        );
+                      })()}
                       {(()=>{
                         const editandoItens=expandidos[g._gid+"_itens"];
                         const toggleEditItens=()=>setExpandidos(p=>({...p,[g._gid+"_itens"]:!p[g._gid+"_itens"]}));
