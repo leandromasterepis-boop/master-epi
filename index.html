@@ -111,6 +111,24 @@ async function cloudSave(key, value){
     return text==="ok"||text.includes("ok");
   }catch{return false;}
 }
+async function cloudUpload(file){
+  const url=localStorage.getItem(STORAGE_SHEETS_URL)||DEFAULT_SHEETS_URL;
+  if(!url||!file)return null;
+  if(file.size>10*1024*1024)throw new Error("A cotação deve ter no máximo 10 MB");
+  const data=await new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=()=>resolve(String(reader.result));
+    reader.onerror=()=>reject(new Error("Não foi possível ler o arquivo"));
+    reader.readAsDataURL(file);
+  });
+  const body=new URLSearchParams({action:"upload",name:file.name,mimeType:file.type||"application/octet-stream",data});
+  const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:body.toString()});
+  const text=await r.text();
+  if(!r.ok)throw new Error("Falha no upload");
+  const result=JSON.parse(text);
+  if(!result.ok)throw new Error(result.error||"Falha no upload");
+  return result;
+}
 async function cloudLoad(key){
   const url=localStorage.getItem(STORAGE_SHEETS_URL)||DEFAULT_SHEETS_URL;
   if(!url)return null;
@@ -1877,6 +1895,8 @@ function PedidosTab({sheetsUrl, nfs, setNfs, fretes, setFretes, navegarParaNF, h
   const [modalNum, setModalNum] = useState("");
   const [modalTexto, setModalTexto] = useState("");
   const [modalPreview, setModalPreview] = useState([]);
+  const [modalFile, setModalFile] = useState(null);
+  const [uploadingCotacao, setUploadingCotacao] = useState(false);
   const [novaSol, setNovaSol] = useState({cod:"", descricao:"", data:""});
   const [toast, setToast] = useState(null);
   const showToast = (m) => { setToast(m); setTimeout(()=>setToast(null),3500); };
@@ -1985,25 +2005,51 @@ function PedidosTab({sheetsUrl, nfs, setNfs, fretes, setFretes, navegarParaNF, h
     return items;
   }
 
-  const criarGrupo=()=>{
+  const criarGrupo=async()=>{
     if(!modalForn.trim()){showToast("⚠️ Informe o fornecedor!");return;}
-    const novo={
-      _gid:Date.now()+Math.random(),
-      fornecedor:modalForn.trim(),
-      dataPedido:modalData,
-      numCotacao:modalNum.trim(),
-      linkCotacao:modalLink.trim(),
-      numeroPedido:"",
-      dataAprovacao:"",
-      faturouDia:"",
-      nf:"",
-      chegouDia:"",
-      valor:"",
-      itens:modalPreview
-    };
-    setGrupos(prev=>[novo,...prev]);
-    setShowModal(false);setModalForn("");setModalData(today());setModalLink("");setModalNum("");setModalTexto("");setModalPreview([]);
-    showToast(`✅ Pedido ${novo.fornecedor} criado!`);
+    setUploadingCotacao(true);
+    try{
+      let link=modalLink.trim();
+      let arquivo=null;
+      if(modalFile){
+        if(!sheetsUrl){showToast("⚠️ Conecte a nuvem antes de anexar a cotação");return;}
+        const uploaded=await cloudUpload(modalFile);
+        link=uploaded.url;
+        arquivo={id:uploaded.id,name:uploaded.name,mimeType:uploaded.mimeType,url:uploaded.url};
+      }
+      const novo={
+        _gid:Date.now()+Math.random(),
+        fornecedor:modalForn.trim(),
+        dataPedido:modalData,
+        numCotacao:modalNum.trim(),
+        linkCotacao:link,
+        cotacaoArquivo:arquivo,
+        numeroPedido:"",
+        dataAprovacao:"",
+        faturouDia:"",
+        nf:"",
+        chegouDia:"",
+        valor:"",
+        itens:modalPreview
+      };
+      setGrupos(prev=>[novo,...prev]);
+      setShowModal(false);setModalForn("");setModalData(today());setModalLink("");setModalNum("");setModalTexto("");setModalPreview([]);setModalFile(null);
+      showToast(`✅ Cotação anexada — ${novo.fornecedor} está pendente de faturamento`);
+    }catch(err){
+      showToast("❌ Não foi possível anexar a cotação");
+    }finally{setUploadingCotacao(false);}
+  };
+  const escolherCotacao=(file)=>{
+    if(!file)return;
+    if(!["application/pdf","image/png","image/jpeg","image/webp"].includes(file.type)){
+      showToast("⚠️ Anexe PDF, JPG, PNG ou WEBP");return;
+    }
+    if(file.size>10*1024*1024){showToast("⚠️ O arquivo deve ter no máximo 10 MB");return;}
+    setModalFile(file);
+  };
+  const colarCotacao=(e)=>{
+    const item=[...(e.clipboardData?.items||[])].find(x=>x.kind==="file");
+    if(item){const file=item.getAsFile();if(file){e.preventDefault();escolherCotacao(file);}}
   };
 
   const updG=(gid,field,value)=>{
@@ -2028,13 +2074,13 @@ function PedidosTab({sheetsUrl, nfs, setNfs, fretes, setFretes, navegarParaNF, h
     if(g.chegouDia)return{label:"✅ Recebido",color:"#4ade80",bg:"#052e16",border:"#16a34a"};
     const nfVinc=nfs&&g.nf?nfs.find(n=>n.numero.trim()===g.nf.trim()||(n.numero.split("/")[0].trim()===g.nf.split("/")[0].trim())):null;
     const frVinc=fretes&&g.nf?fretes.find(f=>f.nfAssociada&&f.nfAssociada.trim()===g.nf.trim()):null;
+    if(g.nf)return{label:"📄 Faturado — aguardando chegar",color:"#67e8f9",bg:"#0c2a3a",border:"#0891b2"};
     if(frVinc)return{label:"🚚 Frete em trânsito",color:"#a78bfa",bg:"#1a0a2a",border:"#7c3aed"};
     if(nfVinc)return{label:"📄 NF-e vinculada",color:"#67e8f9",bg:"#0c2a3a",border:"#0891b2"};
-    if(g.nf)return{label:"📄 NF lançada",color:"#67e8f9",bg:"#0c2a3a",border:"#0891b2"};
     if(g.faturouDia)return{label:"🔄 Faturando — aguard. NF",color:"#fbbf24",bg:"#1c1200",border:"#ca8a04"};
     if(g.numeroPedido)return{label:"⏳ Aguard. NF",color:"#f87171",bg:"#1a0000",border:"#cc0000"};
     if(g.dataAprovacao)return{label:"📤 Aguard. envio pedido",color:"#fb923c",bg:"#1c0a00",border:"#ea580c"};
-    if(g.linkCotacao||g.numCotacao)return{label:"📋 Em cotação",color:"#94a3b8",bg:"#1a1a1a",border:"#334155"};
+    if(g.cotacaoArquivo||g.linkCotacao||g.numCotacao)return{label:"⏳ Pendente de faturamento",color:"#fbbf24",bg:"#1c1200",border:"#ca8a04"};
     return{label:"⏳ Novo",color:"#555",bg:"#111",border:"#222"};
   };
 
@@ -2042,9 +2088,11 @@ function PedidosTab({sheetsUrl, nfs, setNfs, fretes, setFretes, navegarParaNF, h
   const tFat=(g)=>{if(!g.dataAprovacao)return null;if(g.faturouDia)return diffDays(g.dataAprovacao,g.faturouDia);return diasAberto(g.dataAprovacao);};
   const tEnt=(g)=>{if(!g.faturouDia)return null;if(g.chegouDia)return diffDays(g.faturouDia,g.chegouDia);return diasAberto(g.faturouDia);};
 
-  const abertos=grupos.filter(g=>!g.chegouDia);
+  const abertos=grupos.filter(g=>!g.nf&&!g.chegouDia);
+  const faturados=grupos.filter(g=>!!g.nf&&!g.chegouDia);
   const finalizados=grupos.filter(g=>!!g.chegouDia);
-  const filtrados=(sub==="abertos"?abertos:finalizados).filter(g=>{
+  const listaAtual=sub==="abertos"?abertos:(sub==="faturados"?faturados:finalizados);
+  const filtrados=listaAtual.filter(g=>{
     if(!search)return true;
     const s=search.toLowerCase();
     const nfBase=(g.nf||"").split("/")[0].trim();
@@ -2200,7 +2248,7 @@ function PedidosTab({sheetsUrl, nfs, setNfs, fretes, setFretes, navegarParaNF, h
       <CalendarioCompras grupos={grupos} sheetsUrl={sheetsUrl}/>
 
       <div style={{display:"flex",gap:12,marginBottom:20,flexWrap:"wrap"}}>
-        {[["📦","Em Aberto","#fbbf24",abertos.length],["✅","Recebidos","#34d399",finalizados.length],["📋","Total","#fff",grupos.length],["⚠️","Aguard.NF","#f87171",abertos.filter(g=>g.numeroPedido&&!g.nf).length]].map(([ic,lb,cl,ct])=>(
+        {[["📦","Em Aberto","#fbbf24",abertos.length],["✅","Recebidos","#34d399",finalizados.length],["📋","Total","#fff",grupos.length],["📄","Faturados","#67e8f9",faturados.length]].map(([ic,lb,cl,ct])=>(
           <div key={lb} style={{background:"#141414",borderRadius:8,padding:"10px 18px",display:"flex",alignItems:"center",gap:8,border:"1px solid #2a2a2a"}}>
             <span>{ic}</span><span style={{fontSize:13,color:"#94a3b8"}}>{lb}</span><span style={{fontWeight:700,fontSize:20,color:cl}}>{ct}</span>
           </div>
@@ -2208,7 +2256,7 @@ function PedidosTab({sheetsUrl, nfs, setNfs, fretes, setFretes, navegarParaNF, h
       </div>
 
       <div style={{display:"flex",gap:2,borderBottom:"1px solid #2a2a2a",marginBottom:14}}>
-        {[["abertos","⏳ Em Aberto",abertos.length,"#fbbf24"],["finalizados","✅ Recebidos",finalizados.length,"#34d399"],["solicitacoes","📋 Solicitações",solicitacoes.length,"#a78bfa"]].map(([id,lb,ct,cor])=>(
+        {[["abertos","⏳ Pendente faturamento",abertos.length,"#fbbf24"],["faturados","📄 Faturados / aguardando chegar",faturados.length,"#67e8f9"],["finalizados","✅ Recebidos",finalizados.length,"#34d399"],["solicitacoes","📋 Solicitações",solicitacoes.length,"#a78bfa"]].map(([id,lb,ct,cor])=>(
           <button key={id} onClick={()=>setSub(id)} style={{padding:"7px 18px",border:"none",borderRadius:"6px 6px 0 0",cursor:"pointer",fontWeight:600,fontSize:13,background:sub===id?"#0a0a0a":"transparent",color:sub===id?cor:"#555",borderBottom:sub===id?`2px solid ${cor}`:"2px solid transparent"}}>
             {lb} <span style={{background:cor,color:"#000",borderRadius:10,padding:"1px 7px",fontSize:11,marginLeft:4,fontWeight:700}}>{ct}</span>
           </button>
@@ -2232,63 +2280,31 @@ function PedidosTab({sheetsUrl, nfs, setNfs, fretes, setFretes, navegarParaNF, h
 
       {showModal&&(
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
-          <div style={{background:"#141414",border:"1px solid #cc0000",borderRadius:12,padding:24,width:"100%",maxWidth:640,maxHeight:"90vh",overflowY:"auto"}}>
+          <div onPaste={colarCotacao} style={{background:"#141414",border:"1px solid #cc0000",borderRadius:12,padding:24,width:"100%",maxWidth:640,maxHeight:"90vh",overflowY:"auto"}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
               <span style={{color:"#cc0000",fontWeight:700,fontSize:16}}>➕ Novo Pedido</span>
-              <button onClick={()=>{setShowModal(false);setModalForn("");setModalData(today());setModalLink("");setModalNum("");setModalTexto("");setModalPreview([]);}} style={{background:"transparent",border:"1px solid #333",borderRadius:6,color:"#94a3b8",padding:"4px 10px",cursor:"pointer",fontSize:13}}>✕</button>
+              <button onClick={()=>{setShowModal(false);setModalForn("");setModalData(today());setModalLink("");setModalNum("");setModalTexto("");setModalPreview([]);setModalFile(null);}} style={{background:"transparent",border:"1px solid #333",borderRadius:6,color:"#94a3b8",padding:"4px 10px",cursor:"pointer",fontSize:13}}>✕</button>
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:12,marginBottom:12}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:12,marginBottom:14}}>
               <div>
                 <label style={{color:"#64748b",fontSize:11,display:"block",marginBottom:4}}>FORNECEDOR *</label>
-                <input value={modalForn} onChange={e=>setModalForn(e.target.value)} placeholder="Ex: BSB, STEELFLEX..."
+                <input autoFocus value={modalForn} onChange={e=>setModalForn(e.target.value)} placeholder="Ex: BSB, STEELFLEX..."
                   style={{width:"100%",background:"#0a0a0a",border:"1px solid #334155",borderRadius:7,padding:"9px 12px",color:"#e2e8f0",fontSize:13,boxSizing:"border-box"}}/>
               </div>
               <div>
-                <label style={{color:"#64748b",fontSize:11,display:"block",marginBottom:4}}>DATA DO PEDIDO</label>
-                <input value={modalData} onChange={e=>setModalData(e.target.value)}
-                  style={{background:"#0a0a0a",border:"1px solid #334155",borderRadius:7,padding:"9px 12px",color:"#fbbf24",fontSize:13,width:110}}/>
+                <label style={{color:"#64748b",fontSize:11,display:"block",marginBottom:4}}>DATA REGISTRADA</label>
+                <div style={{background:"#0a0a0a",border:"1px solid #334155",borderRadius:7,padding:"9px 12px",color:"#fbbf24",fontSize:13,width:110}}>{modalData}</div>
               </div>
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"auto 1fr",gap:12,marginBottom:12}}>
-              <div>
-                <label style={{color:"#64748b",fontSize:11,display:"block",marginBottom:4}}>Nº COTAÇÃO</label>
-                <input value={modalNum} onChange={e=>setModalNum(e.target.value)} placeholder="Ex: 5388"
-                  style={{background:"#0a0a0a",border:"1px solid #334155",borderRadius:7,padding:"9px 12px",color:"#a5b4fc",fontSize:13,width:110}}/>
-              </div>
-              <div>
-                <label style={{color:"#64748b",fontSize:11,display:"block",marginBottom:4}}>LINK PDF COTAÇÃO (opcional)</label>
-                <input value={modalLink} onChange={e=>setModalLink(e.target.value)} placeholder="https://drive.google.com/file/d/..."
-                  style={{width:"100%",background:"#0a0a0a",border:"1px solid #334155",borderRadius:7,padding:"9px 12px",color:"#4ade80",fontSize:12,boxSizing:"border-box"}}/>
-              </div>
+            <div style={{marginBottom:14,border:"1px dashed #475569",borderRadius:8,padding:12,background:"#0b0b0b"}}>
+              <label style={{color:"#fbbf24",fontSize:11,display:"block",marginBottom:6}}>📎 ANEXAR COTAÇÃO</label>
+              <div style={{color:"#94a3b8",fontSize:12,marginBottom:8}}>Cole uma foto do WhatsApp aqui (Ctrl+V) ou escolha um PDF/imagem.</div>
+              <input id="cotacao-file-input" type="file" accept="application/pdf,image/png,image/jpeg,image/webp" onChange={e=>escolherCotacao(e.target.files?.[0])} style={{display:"none"}}/>
+              <label htmlFor="cotacao-file-input" style={{display:"inline-block",background:"#1e293b",border:"1px solid #475569",borderRadius:6,padding:"7px 12px",color:"#e2e8f0",fontSize:12,cursor:"pointer"}}>Escolher arquivo</label>
+              {modalFile&&<span style={{marginLeft:10,color:"#4ade80",fontSize:12}}>✅ {modalFile.name}</span>}
             </div>
-            {modalLink&&(
-              <div style={{marginBottom:12}}>
-                <a href={modalLink} target="_blank" rel="noreferrer" style={{background:"#052e16",border:"1px solid #16a34a",borderRadius:7,padding:"6px 14px",color:"#4ade80",fontSize:12,textDecoration:"none"}}>
-                  📄 Testar link ↗
-                </a>
-              </div>
-            )}
-            <div style={{marginBottom:12}}>
-              <label style={{color:"#64748b",fontSize:11,display:"block",marginBottom:4}}>ITENS — cole do sistema (opcional)</label>
-              <textarea value={modalTexto} onChange={e=>{setModalTexto(e.target.value);setModalPreview(e.target.value.trim()?parsarItens(e.target.value):[]);}}
-                rows={5} placeholder={"Código  Descrição  Qtd  Saldo"}
-                style={{width:"100%",background:"#0a0a0a",border:"1px solid #334155",borderRadius:7,padding:"10px 12px",color:"#e2e8f0",fontSize:12,boxSizing:"border-box",resize:"vertical",fontFamily:"monospace"}}/>
-            </div>
-            {modalPreview.length>0&&(
-              <div style={{background:"#0a0a0a",border:"1px solid #2a2a2a",borderRadius:8,padding:"10px 14px",marginBottom:14,maxHeight:160,overflowY:"auto"}}>
-                <div style={{color:"#4ade80",fontSize:12,fontWeight:700,marginBottom:8}}>✅ {modalPreview.length} item(ns) detectado(s)</div>
-                {modalPreview.map((it,i)=>(
-                  <div key={i} style={{display:"flex",gap:10,fontSize:11,color:"#94a3b8",marginBottom:3}}>
-                    <span style={{color:"#fbbf24",fontWeight:700,minWidth:40}}>{it.cod}</span>
-                    <span style={{flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{it.descricao}</span>
-                    {it.qtdSugerida&&<span style={{color:"#cc0000"}}>qtd:{it.qtdSugerida}</span>}
-                    {it.saldoEstoque&&<span style={{color:"#34d399"}}>saldo:{it.saldoEstoque}</span>}
-                  </div>
-                ))}
-              </div>
-            )}
             <div style={{display:"flex",justifyContent:"flex-end"}}>
-              <button onClick={criarGrupo} style={{background:"#cc0000",color:"#fff",border:"none",borderRadius:8,padding:"10px 26px",cursor:"pointer",fontWeight:700,fontSize:14}}>✅ Criar Pedido</button>
+              <button onClick={criarGrupo} disabled={uploadingCotacao} style={{background:uploadingCotacao?"#555":"#cc0000",color:"#fff",border:"none",borderRadius:8,padding:"10px 26px",cursor:uploadingCotacao?"wait":"pointer",fontWeight:700,fontSize:14}}>{uploadingCotacao?"⏳ Enviando cotação...":"✅ Criar Pedido"}</button>
             </div>
           </div>
         </div>
@@ -2298,7 +2314,7 @@ function PedidosTab({sheetsUrl, nfs, setNfs, fretes, setFretes, navegarParaNF, h
         filtrados.length===0?(
           <div style={{textAlign:"center",padding:"50px 20px",color:"#475569"}}>
             <div style={{fontSize:44}}>📦</div>
-            <p style={{marginTop:10,fontSize:14}}>{sub==="abertos"?"Nenhum pedido em aberto.":"Nenhum pedido finalizado ainda."}</p>
+            <p style={{marginTop:10,fontSize:14}}>{sub==="abertos"?"Nenhuma cotação pendente de faturamento.":sub==="faturados"?"Nenhum pedido faturado aguardando chegada.":"Nenhum pedido recebido ainda."}</p>
             {sub==="abertos"&&<button onClick={()=>setShowModal(true)} style={{marginTop:14,background:"#cc0000",color:"#fff",border:"none",borderRadius:8,padding:"9px 22px",cursor:"pointer",fontWeight:700,fontSize:13}}>➕ Criar primeiro pedido</button>}
           </div>
         ):(
