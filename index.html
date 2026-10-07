@@ -124,6 +124,30 @@ async function cloudLoad(key){
     return JSON.parse(text);
   }catch{return null;}
 }
+
+const AUTO_SYNC_MS = 120000; // 2 minutos
+function useAutoCloudSync(key, sheetsUrl, onData){
+  const busyRef=useRef(false);
+  useEffect(()=>{
+    if(!sheetsUrl)return;
+    let stopped=false;
+    const sync=async()=>{
+      if(stopped||busyRef.current||document.visibilityState==="hidden")return;
+      busyRef.current=true;
+      try{
+        const data=await cloudLoad(key);
+        if(data!==null && data!==undefined){
+          try{localStorage.setItem(key,JSON.stringify(data));}catch{}
+          onData(data);
+        }
+      }finally{busyRef.current=false;}
+    };
+    const timer=setInterval(sync,AUTO_SYNC_MS);
+    const onVisibility=()=>{if(document.visibilityState==="visible")sync();};
+    document.addEventListener("visibilitychange",onVisibility);
+    return()=>{stopped=true;clearInterval(timer);document.removeEventListener("visibilitychange",onVisibility);};
+  },[key,sheetsUrl,onData]);
+}
 const LOGO_SRC="data:image/png;base64,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";
 
 function today(){return new Date().toLocaleDateString("pt-BR");}
@@ -1285,6 +1309,8 @@ function App(){
   const[highlightPedido,setHighlightPedido]=useState(null);
   const nfsStatus = useAutoSave(STORAGE_NF, nfs);
   const fretesStatus = useAutoSave(STORAGE_FR, fretes);
+  useAutoCloudSync(STORAGE_NF,sheetsUrl,setNfs);
+  useAutoCloudSync(STORAGE_FR,sheetsUrl,setFretes);
   const isConnected=!!sheetsUrl;
 
   const navegarParaNF=(nfNumero)=>{
@@ -1605,6 +1631,7 @@ function CalendarioCompras({grupos, sheetsUrl}){
   const[marcaDetalhe,setMarcaDetalhe]=useState(null);
   const diaAtual=getDiaAtual();
   const marcasHoje=cal[diaAtual]||[];
+  useAutoCloudSync(STORAGE_CAL_V1,sheetsUrl,setCal);
 
   useEffect(()=>{
     async function init(){
@@ -1855,6 +1882,8 @@ function PedidosTab({sheetsUrl, nfs, setNfs, fretes, setFretes, navegarParaNF, h
   const showToast = (m) => { setToast(m); setTimeout(()=>setToast(null),3500); };
   const pedStatus = useAutoSave(STORAGE_PED_V2, grupos);
   const solStatus = useAutoSave(STORAGE_SOL_V2, solicitacoes);
+  useAutoCloudSync(STORAGE_PED_V2,sheetsUrl,setGrupos);
+  useAutoCloudSync(STORAGE_SOL_V2,sheetsUrl,setSolicitacoes);
   const pedidoRefs=useRef({});
 
   useEffect(()=>{
