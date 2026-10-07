@@ -785,7 +785,7 @@ function NfTab({nfs,setNfs,fretes,setFretes,highlightNF,onHighlightDone,navegarP
       )}
       {toast&&<div style={{position:"fixed",top:20,right:20,background:"#065f46",color:"#fff",padding:"12px 20px",borderRadius:10,fontWeight:600,fontSize:14,zIndex:998,boxShadow:"0 4px 20px rgba(0,0,0,0.4)"}}>{toast}</div>}
       <div style={{display:"flex",gap:12,marginBottom:20,flexWrap:"wrap"}}>
-        {[["⏳","Pendentes","#fbbf24",pendentes.length],["✅","Finalizados","#34d399",finalizados.length],["📋","Total","#fff",nfs.length],["📎","Com XML","#a5b4fc",nfs.filter(n=>n.xmlData).length]].map(([ic,lb,cl,ct])=>(
+        {[["⏳","Pendentes","#fbbf24",pendentes.length],["✅","Finalizados","#34d399",finalizados.length],["📋","Total","#fff",nfs.length],["📎","Com XML","#a5b4fc",nfs.filter(n=>n.xmlData).length]].filter(([,lb,,ct])=>ct>0).map(([ic,lb,cl,ct])=>(
           <div key={lb} style={{background:"#141414",borderRadius:8,padding:"10px 18px",display:"flex",alignItems:"center",gap:8,border:"1px solid #2a2a2a"}}>
             <span>{ic}</span><span style={{fontSize:13,color:"#94a3b8"}}>{lb}</span><span style={{fontWeight:700,fontSize:20,color:cl}}>{ct}</span>
           </div>
@@ -2106,6 +2106,8 @@ function PedidosTab({sheetsUrl, nfs, setNfs, fretes, setFretes, navegarParaNF, h
   const abertos=grupos.filter(g=>(!g.faturouDia||!g.nf)&&!g.chegouDia);
   const aguardando=grupos.filter(g=>!!g.faturouDia&&!!g.nf&&!g.chegouDia);
   const finalizados=grupos.filter(g=>!!g.chegouDia);
+  const temposFaturamento=grupos.filter(g=>g.dataPedido&&g.faturouDia).map(g=>Math.max(0,diffDays(g.dataPedido,g.faturouDia)));
+  const mediaFaturamento=temposFaturamento.length?Math.round((temposFaturamento.reduce((a,b)=>a+b,0)/temposFaturamento.length)*10)/10:null;
   const listaAtual=sub==="abertos"?abertos:(sub==="aguardando"?aguardando:finalizados);
   const filtrados=listaAtual.filter(g=>{
     if(!search)return true;
@@ -2262,26 +2264,16 @@ function PedidosTab({sheetsUrl, nfs, setNfs, fretes, setFretes, navegarParaNF, h
 
       <CalendarioCompras grupos={grupos} sheetsUrl={sheetsUrl}/>
 
-      <div style={{display:"flex",gap:12,marginBottom:20,flexWrap:"wrap"}}>
-        {[["📦","Em Aberto","#fbbf24",abertos.length],["📄","Aguardando Chegar","#67e8f9",aguardando.length],["✅","Recebidos","#34d399",finalizados.length],["📋","Total","#fff",grupos.length]].map(([ic,lb,cl,ct])=>(
-          <div key={lb} style={{background:"#141414",borderRadius:8,padding:"10px 18px",display:"flex",alignItems:"center",gap:8,border:"1px solid #2a2a2a"}}>
-            <span>{ic}</span><span style={{fontSize:13,color:"#94a3b8"}}>{lb}</span><span style={{fontWeight:700,fontSize:20,color:cl}}>{ct}</span>
-          </div>
-        ))}
-      </div>
-
-      <div style={{background:"linear-gradient(135deg,#141414,#0b0b0b)",border:"1px solid #2a2a2a",borderRadius:10,padding:"12px 16px",marginBottom:14}}>
-        <div style={{color:"#e2e8f0",fontSize:12,fontWeight:700,marginBottom:10}}>📊 Resumo das cotações</div>
-        <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-          <div style={{color:"#fbbf24",fontSize:12}}>Em aberto: <b>{abertos.length}</b></div>
-          <div style={{color:"#67e8f9",fontSize:12}}>Aguardando chegar: <b>{aguardando.length}</b></div>
-          <div style={{color:"#34d399",fontSize:12}}>Recebidas: <b>{finalizados.length}</b></div>
-          <div style={{color:"#f59e0b",fontSize:12}}>Falta NF: <b>{grupos.filter(g=>!!g.faturouDia&&!g.nf&&!g.chegouDia).length}</b></div>
-          <div style={{color:"#f59e0b",fontSize:12}}>Falta data: <b>{grupos.filter(g=>!!g.nf&&!g.faturouDia&&!g.chegouDia).length}</b></div>
+      <div style={{background:"linear-gradient(135deg,#141414,#0b0b0b)",border:"1px solid #2a2a2a",borderRadius:10,padding:"12px 16px",marginBottom:14,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+        <span style={{fontSize:20}}>⏱</span>
+        <div>
+          <div style={{color:"#94a3b8",fontSize:11,textTransform:"uppercase",letterSpacing:1}}>Tempo médio até faturamento</div>
+          <div style={{color:"#fbbf24",fontSize:22,fontWeight:800}}>{mediaFaturamento===null?"—":`${mediaFaturamento} dia(s)`}</div>
         </div>
+        <span style={{color:"#64748b",fontSize:11}}>{temposFaturamento.length?`Baseado em ${temposFaturamento.length} cotação(ões) faturada(s)`:"Ainda não há cotações faturadas"}</span>
       </div>
       <div style={{display:"flex",gap:2,borderBottom:"1px solid #2a2a2a",marginBottom:14}}>
-        {[["abertos","⏳ Cotações em aberto",abertos.length,"#fbbf24"],["aguardando","📄 Aguardando Chegar",aguardando.length,"#67e8f9"],["finalizados","✅ Recebidos",finalizados.length,"#34d399"],["solicitacoes","📋 Solicitações",solicitacoes.length,"#a78bfa"]].map(([id,lb,ct,cor])=>(
+        {[["abertos","⏳ Cotações em aberto",abertos.length,"#fbbf24"],["aguardando","📄 Aguardando Chegar",aguardando.length,"#67e8f9"],["finalizados","✅ Recebidos",finalizados.length,"#34d399"],["solicitacoes","📋 Solicitações",solicitacoes.length,"#a78bfa"]].filter(([,lb,ct])=>ct>0).map(([id,lb,ct,cor])=>(
           <button key={id} onClick={()=>setSub(id)} style={{padding:"7px 18px",border:"none",borderRadius:"6px 6px 0 0",cursor:"pointer",fontWeight:600,fontSize:13,background:sub===id?"#0a0a0a":"transparent",color:sub===id?cor:"#555",borderBottom:sub===id?`2px solid ${cor}`:"2px solid transparent"}}>
             {lb} <span style={{background:cor,color:"#000",borderRadius:10,padding:"1px 7px",fontSize:11,marginLeft:4,fontWeight:700}}>{ct}</span>
           </button>
@@ -2383,9 +2375,7 @@ function PedidosTab({sheetsUrl, nfs, setNfs, fretes, setFretes, navegarParaNF, h
                       <ChegouInput value={g.chegouDia} onSave={v=>updG(g._gid,"chegouDia",v)}/>
                     </div>
                     <div style={{display:"flex",gap:4,flexWrap:"wrap",marginLeft:"auto"}}>
-                      {tc!==null&&<div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:1}}><span style={{fontSize:9,color:"#475569"}}>⏱Cotação</span><DiasBadge dias={tc}/></div>}
-                      {tf!==null&&<div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:1}}><span style={{fontSize:9,color:"#475569"}}>⏱Faturar</span><DiasBadge dias={tf}/></div>}
-                      {te!==null&&<div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:1}}><span style={{fontSize:9,color:"#475569"}}>⏱Entrega</span>{g.chegouDia?<span style={{background:"#0f2922",border:"1px solid #10b981",borderRadius:6,padding:"3px 9px",color:"#34d399",fontWeight:700,fontSize:12}}>{te}d ✓</span>:<DiasBadge dias={te}/>}</div>}
+                      {tc!==null&&<div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:1}}><span style={{fontSize:9,color:"#475569"}}>⏱Aguard. faturamento</span><DiasBadge dias={tc}/></div>}
                     </div>
                     <span style={{background:st.bg,border:`1px solid ${st.border}`,borderRadius:6,padding:"4px 10px",color:st.color,fontWeight:700,fontSize:11,whiteSpace:"nowrap",flexShrink:0}}>{st.label}</span>
                     {alerta&&<span style={{background:alerta.bg,border:`1px solid ${alerta.border}`,borderRadius:6,padding:"4px 10px",color:alerta.color,fontWeight:700,fontSize:11,whiteSpace:"nowrap",flexShrink:0}}>{alerta.label}</span>}
