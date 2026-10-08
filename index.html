@@ -1030,7 +1030,6 @@ function App(){
   const nfsStatus = useAutoSave(STORAGE_NF, nfs);
   const fretesStatus = useAutoSave(STORAGE_FR, fretes);
   useAutoCloudSync(STORAGE_NF,sheetsUrl,setNfs);
-  useAutoCloudSync(STORAGE_FR,sheetsUrl,setFretes);
   const isConnected=!!sheetsUrl;
 
   const navegarParaNF=(nfNumero)=>{
@@ -1054,7 +1053,9 @@ function App(){
       if(sheetsUrl){
         setSyncStatus("syncing");setSyncMsg("Sincronizando com a nuvem...");
         try{
-          [cloudNfs,cloudFr]=await Promise.all([cloudLoad(STORAGE_NF),cloudLoad(STORAGE_FR)]);
+          // A implantação atual disponibiliza somente nfe_v4 para leitura.
+          cloudNfs=await cloudLoad(STORAGE_NF);
+          cloudFr=null;
           if(Array.isArray(cloudNfs)){
             setNfs(cloudNfs);
             try{localStorage.setItem(STORAGE_NF,JSON.stringify(cloudNfs));}catch{}
@@ -1177,17 +1178,14 @@ function App(){
   const forceSync=async()=>{
     if(!sheetsUrl){alert("⚠️ Nuvem não configurada.");return;}
     if(!confirm("Isso irá substituir os dados atuais pelos dados salvos na nuvem. Continuar?"))return;
-    setSyncStatus("syncing");setSyncMsg("🔄 Baixando tudo da nuvem...");
+    setSyncStatus("syncing");setSyncMsg("🔄 Baixando NF-e da nuvem...");
     try{
-      // Sincroniza NF e fretes nesta ação; os outros módulos sincronizam separadamente.
-      const [cnf,cfr]=await Promise.all([
-        cloudLoad(STORAGE_NF),cloudLoad(STORAGE_FR),
-      ]);
+      // Evita chaves que retornam 404 na implantação atual.
+      const cnf=await cloudLoad(STORAGE_NF);
       let count=0;
       if(cnf&&Array.isArray(cnf)){setNfs(cnf);localStorage.setItem(STORAGE_NF,JSON.stringify(cnf));count++;}
-      if(cfr&&Array.isArray(cfr)){setFretes(cfr);localStorage.setItem(STORAGE_FR,JSON.stringify(cfr));count++;}
       setSyncStatus("ok");
-      setSyncMsg(`✅ Sincronizado! ${count} conjunto(s) principal(is) atualizado(s), sem recarregar a tela.`);
+      setSyncMsg(`✅ NF-e sincronizadas: ${count ? "dados atualizados" : "nenhuma alteração recebida"}.`);
       setTimeout(()=>{setSyncStatus("idle");setSyncMsg("");},3500);
     }catch(err){
       setSyncStatus("error");setSyncMsg("❌ Erro: "+err.message);
