@@ -2099,15 +2099,21 @@ function PedidosTab({sheetsUrl, nfs, setNfs, fretes, setFretes, navegarParaNF, h
     if(dias<=3)return{label:`⚠️ Chegada em ${dias} dia(s)`,color:"#fde68a",bg:"#451a03",border:"#f59e0b"};
     return null;
   };
-  const tCot=(g)=>{if(!g.dataPedido)return null;if(g.dataAprovacao)return diffDays(g.dataPedido,g.dataAprovacao);return diasAberto(g.dataPedido);};
-  const tFat=(g)=>{if(!g.dataAprovacao)return null;if(g.faturouDia)return diffDays(g.dataAprovacao,g.faturouDia);return diasAberto(g.dataAprovacao);};
+  const dataInicioCotacao=(g)=>g.dataPedido||g.dataSolicitacao||g.dataCadastro||null;
+  const tCot=(g)=>{const inicio=dataInicioCotacao(g);if(!inicio)return null;if(g.faturouDia)return diffDays(inicio,g.faturouDia);return diasAberto(inicio);};
+  const tFat=(g)=>{const inicio=dataInicioCotacao(g);if(!inicio)return null;if(g.faturouDia)return diffDays(inicio,g.faturouDia);return diasAberto(inicio);};
   const tEnt=(g)=>{if(!g.faturouDia)return null;if(g.chegouDia)return diffDays(g.faturouDia,g.chegouDia);return diasAberto(g.faturouDia);};
 
   const abertos=grupos.filter(g=>(!g.faturouDia||!g.nf)&&!g.chegouDia);
   const aguardando=grupos.filter(g=>!!g.faturouDia&&!!g.nf&&!g.chegouDia);
   const finalizados=grupos.filter(g=>!!g.chegouDia);
-  const temposFaturamento=grupos.filter(g=>g.dataPedido&&g.faturouDia).map(g=>Math.max(0,diffDays(g.dataPedido,g.faturouDia)));
+  const temposFaturamento=grupos.filter(g=>dataInicioCotacao(g)&&g.faturouDia).map(g=>Math.max(0,diffDays(dataInicioCotacao(g),g.faturouDia)));
   const mediaFaturamento=temposFaturamento.length?Math.round((temposFaturamento.reduce((a,b)=>a+b,0)/temposFaturamento.length)*10)/10:null;
+  const mediaPorFornecedor=(fornecedor)=>{
+    const nome=String(fornecedor||"").trim().toLowerCase();
+    const tempos=grupos.filter(g=>String(g.fornecedor||"").trim().toLowerCase()===nome&&dataInicioCotacao(g)&&g.faturouDia).map(g=>Math.max(0,diffDays(dataInicioCotacao(g),g.faturouDia)));
+    return tempos.length?Math.round((tempos.reduce((a,b)=>a+b,0)/tempos.length)*10)/10:null;
+  };
   const listaAtual=sub==="abertos"?abertos:(sub==="aguardando"?aguardando:finalizados);
   const filtrados=listaAtual.filter(g=>{
     if(!search)return true;
@@ -2264,22 +2270,6 @@ function PedidosTab({sheetsUrl, nfs, setNfs, fretes, setFretes, navegarParaNF, h
 
       <CalendarioCompras grupos={grupos} sheetsUrl={sheetsUrl}/>
 
-      <div style={{background:"linear-gradient(135deg,#141414,#0b0b0b)",border:"1px solid #2a2a2a",borderRadius:10,padding:"12px 16px",marginBottom:14,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-        <span style={{fontSize:20}}>⏱</span>
-        <div>
-          <div style={{color:"#94a3b8",fontSize:11,textTransform:"uppercase",letterSpacing:1}}>Tempo médio até faturamento</div>
-          <div style={{color:"#fbbf24",fontSize:22,fontWeight:800}}>{mediaFaturamento===null?"—":`${mediaFaturamento} dia(s)`}</div>
-        </div>
-        <span style={{color:"#64748b",fontSize:11}}>{temposFaturamento.length?`Baseado em ${temposFaturamento.length} cotação(ões) faturada(s)`:"Ainda não há cotações faturadas"}</span>
-      </div>
-      <div style={{display:"flex",gap:2,borderBottom:"1px solid #2a2a2a",marginBottom:14}}>
-        {[["abertos","⏳ Cotações em aberto",abertos.length,"#fbbf24"],["aguardando","📄 Aguardando Chegar",aguardando.length,"#67e8f9"],["finalizados","✅ Recebidos",finalizados.length,"#34d399"],["solicitacoes","📋 Solicitações",solicitacoes.length,"#a78bfa"]].filter(([,lb,ct])=>ct>0).map(([id,lb,ct,cor])=>(
-          <button key={id} onClick={()=>setSub(id)} style={{padding:"7px 18px",border:"none",borderRadius:"6px 6px 0 0",cursor:"pointer",fontWeight:600,fontSize:13,background:sub===id?"#0a0a0a":"transparent",color:sub===id?cor:"#555",borderBottom:sub===id?`2px solid ${cor}`:"2px solid transparent"}}>
-            {lb} <span style={{background:cor,color:"#000",borderRadius:10,padding:"1px 7px",fontSize:11,marginLeft:4,fontWeight:700}}>{ct}</span>
-          </button>
-        ))}
-      </div>
-
       {sub!=="solicitacoes"&&(
         <div style={{display:"flex",gap:10,marginBottom:14,flexWrap:"wrap"}}>
           <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Buscar fornecedor, nº pedido, cotação ou NF..." style={{flex:1,minWidth:200,background:"#141414",border:"1px solid #2a2a2a",borderRadius:8,padding:"8px 14px",color:"#e2e8f0",fontSize:13}}/>
@@ -2339,7 +2329,8 @@ function PedidosTab({sheetsUrl, nfs, setNfs, fretes, setFretes, navegarParaNF, h
             {filtrados.map((g)=>{
               const st=getStatus(g);
               const alerta=alertaChegada(g);
-              const tc=tCot(g),tf=tFat(g),te=tEnt(g);
+              const tc=tCot(g);
+              const mediaFornecedor=mediaPorFornecedor(g.fornecedor);
               const exp=expandidos[g._gid];
               return(
                 <div key={g._gid} ref={el=>{if(el)pedidoRefs.current[g._gid]=el;}} style={{background:"#141414",border:"1px solid #2a2a2a",borderRadius:10,marginBottom:10,overflow:"hidden"}}>
@@ -2348,7 +2339,8 @@ function PedidosTab({sheetsUrl, nfs, setNfs, fretes, setFretes, navegarParaNF, h
                       style={{background:"transparent",border:"none",color:"#555",cursor:"pointer",fontSize:14,padding:"0 4px",flexShrink:0}}>{exp?"▼":"▶"}</button>
                     <div style={{display:"flex",flexDirection:"column",minWidth:110,flexShrink:0}}>
                       <span style={{fontWeight:700,color:"#cc0000",fontSize:14}}>{g.fornecedor}</span>
-                      <span style={{color:"#475569",fontSize:11}}>{g.dataPedido}</span>
+                      {mediaFornecedor!==null&&<span style={{color:"#fbbf24",fontSize:10,fontWeight:700}}>Média p/ faturar: {mediaFornecedor}d</span>}
+                      <span style={{color:"#475569",fontSize:11}}>{g.dataPedido||g.dataSolicitacao||""}</span>
                     </div>
                     <CotacaoBadge g={g}/>
                     <span style={{color:"#2a2a2a",fontSize:18,flexShrink:0}}>→</span>
