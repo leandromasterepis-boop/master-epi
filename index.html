@@ -2270,6 +2270,13 @@ function PedidosTab({sheetsUrl, nfs, setNfs, fretes, setFretes, navegarParaNF, h
 
       <CalendarioCompras grupos={grupos} sheetsUrl={sheetsUrl}/>
 
+      <div style={{display:"flex",gap:2,borderBottom:"1px solid #2a2a2a",marginBottom:14}}>
+        {[['abertos','⏳ Cotações em aberto',abertos.length,'#fbbf24'],['aguardando','📄 Pedidos faturados',aguardando.length,'#67e8f9']].map(([id,lb,ct,cor])=>(
+          <button key={id} onClick={()=>setSub(id)} style={{padding:"8px 18px",border:"none",borderRadius:"6px 6px 0 0",cursor:"pointer",fontWeight:600,fontSize:13,background:sub===id?"#0a0a0a":"transparent",color:sub===id?cor:"#64748b",borderBottom:sub===id?`2px solid ${cor}`:"2px solid transparent"}}>
+            {lb} <span style={{background:cor,color:"#000",borderRadius:10,padding:"1px 7px",fontSize:11,marginLeft:4,fontWeight:700}}>{ct}</span>
+          </button>
+        ))}
+      </div>
       {sub!=="solicitacoes"&&(
         <div style={{display:"flex",gap:10,marginBottom:14,flexWrap:"wrap"}}>
           <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Buscar fornecedor, nº pedido, cotação ou NF..." style={{flex:1,minWidth:200,background:"#141414",border:"1px solid #2a2a2a",borderRadius:8,padding:"8px 14px",color:"#e2e8f0",fontSize:13}}/>
@@ -2321,7 +2328,7 @@ function PedidosTab({sheetsUrl, nfs, setNfs, fretes, setFretes, navegarParaNF, h
         filtrados.length===0?(
           <div style={{textAlign:"center",padding:"50px 20px",color:"#475569"}}>
             <div style={{fontSize:44}}>📦</div>
-            <p style={{marginTop:10,fontSize:14}}>{sub==="abertos"?"Nenhuma cotação pendente de faturamento.":sub==="aguardando"?"Nenhum pedido faturado aguardando chegada.":"Nenhum pedido recebido ainda."}</p>
+            <p style={{marginTop:10,fontSize:14}}>{sub==="abertos"?"Nenhuma cotação pendente de faturamento.":sub==="aguardando"?"Nenhum pedido faturado ainda.":"Nenhum pedido recebido ainda."}</p>
             {sub==="abertos"&&<button onClick={()=>setShowModal(true)} style={{marginTop:14,background:"#cc0000",color:"#fff",border:"none",borderRadius:8,padding:"9px 22px",cursor:"pointer",fontWeight:700,fontSize:13}}>➕ Criar primeiro pedido</button>}
           </div>
         ):(
