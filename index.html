@@ -1179,18 +1179,15 @@ function App(){
     if(!confirm("Isso irá substituir os dados atuais pelos dados salvos na nuvem. Continuar?"))return;
     setSyncStatus("syncing");setSyncMsg("🔄 Baixando tudo da nuvem...");
     try{
-      const [cnf,cfr,cped,csol,ccal]=await Promise.all([
-        cloudLoad(STORAGE_NF),cloudLoad(STORAGE_FR),cloudLoad(STORAGE_PED_V2),
-        cloudLoad(STORAGE_SOL_V2),cloudLoad(STORAGE_CAL_V1),
+      // Sincroniza NF e fretes nesta ação; os outros módulos sincronizam separadamente.
+      const [cnf,cfr]=await Promise.all([
+        cloudLoad(STORAGE_NF),cloudLoad(STORAGE_FR),
       ]);
       let count=0;
       if(cnf&&Array.isArray(cnf)){setNfs(cnf);localStorage.setItem(STORAGE_NF,JSON.stringify(cnf));count++;}
       if(cfr&&Array.isArray(cfr)){setFretes(cfr);localStorage.setItem(STORAGE_FR,JSON.stringify(cfr));count++;}
-      if(cped&&Array.isArray(cped)&&cped.length>0){localStorage.setItem(STORAGE_PED_V2,JSON.stringify(cped));count++;}
-      if(csol&&Array.isArray(csol)&&csol.length>0){localStorage.setItem(STORAGE_SOL_V2,JSON.stringify(csol));count++;}
-      if(ccal&&typeof ccal==="object"&&Object.keys(ccal).length>0){localStorage.setItem(STORAGE_CAL_V1,JSON.stringify(ccal));count++;}
       setSyncStatus("ok");
-      setSyncMsg(`✅ Sincronizado! ${count} conjunto(s) atualizado(s), sem recarregar a tela.`);
+      setSyncMsg(`✅ Sincronizado! ${count} conjunto(s) principal(is) atualizado(s), sem recarregar a tela.`);
       setTimeout(()=>{setSyncStatus("idle");setSyncMsg("");},3500);
     }catch(err){
       setSyncStatus("error");setSyncMsg("❌ Erro: "+err.message);
