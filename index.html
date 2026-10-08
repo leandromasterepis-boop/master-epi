@@ -28,7 +28,7 @@ select option{background:#1a1a1a;color:#e2e8f0;}
 </style>
 </head>
 <body>
-<div id="root"></div>
+<div id="root"><div style="padding:24px;color:#e2e8f0;font:600 14px Segoe UI,Arial,sans-serif">Carregando Controle Diário… Se esta mensagem não mudar, verifique a conexão com a internet e recarregue a página.</div></div>
 <script type="text/babel">
 const {useState,useEffect,useRef}=React;
 
@@ -89,9 +89,9 @@ const DATA_CACHE_VERSION = "cloud-first-2026-10-06-v1";
 // removemos automaticamente os dados locais antigos, sem apagar a URL da nuvem.
 (function migrateLocalCache(){
   try{
+    // Migração não destrutiva: mantém os dados locais existentes entre versões.
+    // O cache só é marcado com a versão atual; nenhum registro do usuário é removido.
     if(localStorage.getItem(STORAGE_CACHE_VERSION)!==DATA_CACHE_VERSION){
-      [STORAGE_NF,STORAGE_FR,STORAGE_PED_V2,STORAGE_SOL_V2,STORAGE_CAL_V1]
-        .forEach(k=>localStorage.removeItem(k));
       localStorage.setItem(STORAGE_CACHE_VERSION,DATA_CACHE_VERSION);
     }
   }catch(e){ console.warn("Não foi possível atualizar o cache local",e); }
@@ -315,6 +315,160 @@ function DanfeModal({nf,onClose,fretes=[],navegarParaPedido}){
     </div>
   );
 }
+// Helpers restaurados da versão anterior (importação e controles de NF-e/Fretes).
+function parseNFs(text){
+  const lines=text.trim().split(/\n/).map(l=>l.trim()).filter(Boolean);const r=[];
+  for(const line of lines){
+    if(/^(número|emissão|emitente)/i.test(line))continue;
+    const p=line.split(/\t/);
+    if(p.length>=5){r.push({numero:p[0]?.trim()||"",emissao:p[1]?.trim()||"",emitente:p[2]?.trim()||"",natureza:p[3]?.trim()||"",valor:p[4]?.trim()||"",pedido:"",obs:"",chegou:""});continue;}
+    const dm=line.match(/(\d{2}\/\d{2}\/\d{4})/);const vm=line.match(/(R\$\s*[\d.,]+)/i);if(!dm)continue;
+    const di=line.indexOf(dm[0]);const num=line.substring(0,di).trim();const after=line.substring(di+dm[0].length).trim();
+    const cm=after.match(/^(.*?\(CNPJ:\s*[\d.\/-]+\))/i);
+    let emit="",valor=vm?vm[0]:"";
+    if(cm){emit=cm[1].trim();}else if(vm){const vi=after.indexOf(vm[0]);emit=after.substring(0,vi).trim();}
+    if(num)r.push({numero:num,emissao:dm[0],emitente:emit,natureza:"",valor,pedido:"",obs:"",chegou:""});
+  }
+  return r;
+}
+function parseFretes(text){
+  const lines=text.trim().split(/\n/).map(l=>l.trim()).filter(Boolean);
+  const r=[];
+  const BLANK={pedido:"",rastreio:"",obs:"",chegou:"",origem:"",destino:"",previsao:"",nfAssociada:""};
+  const NATS_CAPS=["SAIDA PARA FORA DO ESTADO ESTABELECIMENTO COMERCIAL","TRANSPORTE RODOVIARIO","TRANSP A EST COMERCIAL","TRANSPORTE DE CARGAS","PRESTACAO DE SERVICO DE TRANSPORTE"];
+  for(const line of lines){
+    if(/^(número|emissão|transportadora)/i.test(line))continue;
+    // Formato tabulado (exportação XLS/cópia tabela)
+    const p=line.split(/\t/);
+    if(p.length>=4){r.push({nf:p[0]?.trim()||"",emissao:p[1]?.trim()||"",transportadora:p[2]?.trim()||"",valor:fmtVal(p[3]?.trim()||"")||p[3]?.trim()||"",...BLANK});continue;}
+    // Formato colado do sistema: numero/serie(grudado)dd/mm/aaaa(grudado)TRANSPORTADORA(grudado)natureza(grudado)R$ valor(grudado)status
+    const m=line.match(/^(\d+\/\d{1,3})(\d{2}\/\d{2}\/\d{4})(.*?)(R\$\s*[\d.,]+)/i);
+    if(m){
+      const[,nf,emissao,middle,valor]=m;
+      // Separar transportadora (CAPS) da natureza
+      const transMatch=middle.match(/^([A-ZÁÉÍÓÚÀÃÂÊÔÇÑ\s\d.\/\-&]+?)(?=[A-Z][a-záéíóúàãâêôç]|$)/);
+      let trans=transMatch?transMatch[1].trim():middle.trim();
+      // Verificar se natureza em CAPS está colada no fim da transportadora
+      for(const k of NATS_CAPS){if(trans.toUpperCase().endsWith(k)){trans=trans.slice(0,trans.toUpperCase().lastIndexOf(k)).trim();break;}}
+      if(nf||trans)r.push({nf,emissao,transportadora:trans,valor:fmtVal(valor)||valor,...BLANK});
+      continue;
+    }
+    // Fallback: buscar data em qualquer posição
+    const dm=line.match(/(\d{2}\/\d{2}\/\d{4})/);const vm=line.match(/(R\$\s*[\d.,]+)/i);if(!dm)continue;
+    const di=line.indexOf(dm[0]);const nf=line.substring(0,di).trim();const after=line.substring(di+dm[0].length);
+    let trans="",valor=vm?vm[0]:"";
+    if(vm){const vi=after.indexOf(vm[0]);trans=after.substring(0,vi).trim();}
+    if(nf||trans)r.push({nf,emissao:dm[0],transportadora:trans,valor,...BLANK});
+  }
+  return r;
+}
+
+function parseXLS_Fretes(file){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=e=>{
+      try{
+        const wb=XLSX.read(e.target.result,{type:"array",cellDates:true});
+        const ws=wb.Sheets[wb.SheetNames[0]];
+        const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:""});
+        if(!rows||rows.length<2){resolve([]);return;}
+        // Detect header row
+        let headerIdx=0;
+        for(let i=0;i<Math.min(5,rows.length);i++){
+          const row=rows[i].map(c=>String(c).toLowerCase());
+          if(row.some(c=>c.includes("cte")||c.includes("ct-e")||c.includes("conhecimento")||c.includes("número")||c.includes("numero")||c.includes("nf"))){
+            headerIdx=i;break;
+          }
+        }
+        const headers=rows[headerIdx].map(h=>String(h||"").toLowerCase().trim());
+        const col=(names)=>{for(const n of names){const i=headers.findIndex(h=>h.includes(n));if(i>=0)return i;}return -1;};
+        const iNf    = col(["cte","ct-e","conhecimento","número","numero","nf"]);
+        const iEmiss = col(["emissão","emissao","data emis","dt emis","data"]);
+        const iTrans = col(["transportadora","transp","trans","empresa","razão","razao","nome"]);
+        const iValor = col(["valor","vlr","vl "]);
+        const iOrig  = col(["origem","orig"]);
+        const iDest  = col(["destino","dest"]);
+        const iPrev  = col(["previsão","previsao","prev","entrega"]);
+        const iPed   = col(["pedido","ped"]);
+        const iRastr = col(["rastreio","rastreamento","track"]);
+        const result=[];
+        for(let i=headerIdx+1;i<rows.length;i++){
+          const r=rows[i];
+          if(!r||r.every(c=>!c))continue;
+          const get=(idx)=>idx>=0?String(r[idx]||"").trim():"";
+          const fmtDate=(v)=>{
+            if(!v)return"";
+            if(v instanceof Date){const d=v;return`${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`;}
+            const s=String(v).trim();
+            if(/\d{2}\/\d{2}\/\d{4}/.test(s))return s;
+            // Excel serial
+            if(/^\d+$/.test(s)){const d=new Date(Math.round((parseInt(s)-25569)*86400*1000));return`${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`;}
+            return s;
+          };
+          const nf=get(iNf);
+          const trans=get(iTrans);
+          if(!nf&&!trans)continue;
+          const rawVal=iValor>=0?r[iValor]||"":"";
+          const valor=rawVal?fmtVal(String(rawVal)):"";
+          result.push({
+            nf,
+            emissao:fmtDate(iEmiss>=0?r[iEmiss]||"":""),
+            transportadora:trans,
+            valor,
+            origem:get(iOrig),
+            destino:get(iDest),
+            previsao:fmtDate(iPrev>=0?r[iPrev]||"":""),
+            pedido:get(iPed),
+            rastreio:get(iRastr),
+            obs:"",chegou:"",nfAssociada:""
+          });
+        }
+        resolve(result);
+      }catch(err){reject(err);}
+    };
+    reader.onerror=reject;
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function ChegouInput({value,onSave}){
+  const[draft,setDraft]=useState(value||"");
+  useEffect(()=>{setDraft(value||"");},[value]);
+  const handleChange=e=>{let v=e.target.value;setDraft(v);if(v.length===10){onSave(v);}if(v.length===0&&value){onSave("");}};
+  const handleBlur=()=>{if(draft.length===10){onSave(draft);}else if(draft.length===0&&value){onSave("");}else{setDraft(value||"");}};
+  const handleKeyDown=e=>{if(e.key==="Enter"&&draft.length===10){onSave(draft);}if(e.key==="Escape"){setDraft(value||"");}};
+  return <input value={draft} onChange={handleChange} onBlur={handleBlur} onKeyDown={handleKeyDown} placeholder="dd/mm/aaaa" style={{background:"transparent",border:`1px solid ${draft.length>0&&draft.length<10?"#cc0000":"#2a2a2a"}`,borderRadius:6,padding:"4px 8px",color:"#4ade80",fontSize:12,width:95,textAlign:"center"}}/>;
+}
+function LinkBadge({value,placeholder,color,bg,borderColor,icon,onChange,onClear}){
+  const[ed,setEd]=useState(false);const[draft,setDraft]=useState(value||"");
+  if(value&&!ed)return <span style={{background:bg,border:`1px solid ${borderColor}`,borderRadius:6,padding:"3px 8px",color,fontWeight:700,fontSize:12,whiteSpace:"nowrap",display:"inline-flex",alignItems:"center",gap:4}}>{icon} {value}<button onClick={onClear} style={{background:"none",border:"none",color:"#64748b",cursor:"pointer",padding:"0 0 0 2px",fontSize:10}}>✕</button></span>;
+  if(ed)return <input autoFocus value={draft} onChange={e=>setDraft(e.target.value)} onBlur={()=>{onChange(draft);setEd(false);}} onKeyDown={e=>{if(e.key==="Enter"){onChange(draft);setEd(false);}if(e.key==="Escape")setEd(false);}} style={{background:"#0a0a0a",border:`1px solid ${borderColor}`,borderRadius:5,padding:"3px 8px",color,fontSize:12,width:110}}/>;
+  return <button onClick={()=>{setDraft("");setEd(true);}} style={{background:"transparent",border:"1px dashed #334155",borderRadius:5,padding:"3px 8px",color:"#475569",fontSize:12,cursor:"pointer"}}>{placeholder}</button>;
+}
+function DiasBadge({dias}){
+  if(dias===null||dias===undefined)return <span style={{color:"#475569"}}>—</span>;
+  let bg,color,border;
+  if(dias<=10){bg="#052e16";color="#4ade80";border="#16a34a";}
+  else if(dias<=15){bg="#1c1a02";color="#fde047";border="#ca8a04";}
+  else if(dias<=20){bg="#431407";color="#fb923c";border="#ea580c";}
+  else{bg="#450a0a";color="#f87171";border="#dc2626";}
+  return <span style={{background:bg,border:`1px solid ${border}`,borderRadius:6,padding:"3px 10px",color,fontWeight:700,fontSize:12,whiteSpace:"nowrap"}}>{dias}d</span>;
+}
+function MediaBadge({media,count}){
+  if(!media&&media!==0)return <span style={{color:"#444",fontSize:11}}>—</span>;
+  return <span style={{background:"#1a0000",border:"1px solid #cc0000",borderRadius:6,padding:"3px 9px",color:"#ff9999",fontWeight:600,fontSize:11,whiteSpace:"nowrap"}} title={`Baseado em ${count} entrega(s)`}>📊 ~{media}d</span>;
+}
+function SubTabs({active,setActive,pendentes,finalizados,color}){
+  const s=(a)=>({padding:"7px 18px",border:"none",borderRadius:"6px 6px 0 0",cursor:"pointer",fontWeight:600,fontSize:13,background:a?"#0a0a0a":"transparent",color:a?color:"#555",borderBottom:a?`2px solid ${color}`:"2px solid transparent"});
+  return(
+    <div style={{display:"flex",gap:2,borderBottom:"1px solid #2a2a2a"}}>
+      <button style={s(active==="pendentes")} onClick={()=>setActive("pendentes")}>⏳ Pendentes <span style={{background:"#f59e0b",color:"#000",borderRadius:10,padding:"1px 7px",fontSize:11,marginLeft:4,fontWeight:700}}>{pendentes}</span></button>
+      <button style={s(active==="finalizados")} onClick={()=>setActive("finalizados")}>✅ Finalizados <span style={{background:"#10b981",color:"#000",borderRadius:10,padding:"1px 7px",fontSize:11,marginLeft:4,fontWeight:700}}>{finalizados}</span></button>
+    </div>
+  );
+}
+
+
 function NfTab({nfs,setNfs,fretes,setFretes,highlightNF,onHighlightDone,navegarParaPedido,onChegouSync}){
   const[sub,setSub]=useState("pendentes");
   const[showPaste,setShowPaste]=useState(false);
@@ -1030,6 +1184,7 @@ function App(){
   const nfsStatus = useAutoSave(STORAGE_NF, nfs);
   const fretesStatus = useAutoSave(STORAGE_FR, fretes);
   useAutoCloudSync(STORAGE_NF,sheetsUrl,setNfs);
+  useAutoCloudSync(STORAGE_FR,sheetsUrl,setFretes);
   const isConnected=!!sheetsUrl;
 
   const navegarParaNF=(nfNumero)=>{
@@ -1053,9 +1208,7 @@ function App(){
       if(sheetsUrl){
         setSyncStatus("syncing");setSyncMsg("Sincronizando com a nuvem...");
         try{
-          // A implantação atual disponibiliza somente nfe_v4 para leitura.
-          cloudNfs=await cloudLoad(STORAGE_NF);
-          cloudFr=null;
+          [cloudNfs,cloudFr]=await Promise.all([cloudLoad(STORAGE_NF),cloudLoad(STORAGE_FR)]);
           if(Array.isArray(cloudNfs)){
             setNfs(cloudNfs);
             try{localStorage.setItem(STORAGE_NF,JSON.stringify(cloudNfs));}catch{}
@@ -1178,15 +1331,23 @@ function App(){
   const forceSync=async()=>{
     if(!sheetsUrl){alert("⚠️ Nuvem não configurada.");return;}
     if(!confirm("Isso irá substituir os dados atuais pelos dados salvos na nuvem. Continuar?"))return;
-    setSyncStatus("syncing");setSyncMsg("🔄 Baixando NF-e da nuvem...");
+    setSyncStatus("syncing");setSyncMsg("🔄 Baixando tudo da nuvem...");
     try{
-      // Evita chaves que retornam 404 na implantação atual.
-      const cnf=await cloudLoad(STORAGE_NF);
+      const [cnf,cfr,cped,csol,ccal]=await Promise.all([
+        cloudLoad(STORAGE_NF),cloudLoad(STORAGE_FR),cloudLoad(STORAGE_PED_V2),
+        cloudLoad(STORAGE_SOL_V2),cloudLoad(STORAGE_CAL_V1),
+      ]);
       let count=0;
       if(cnf&&Array.isArray(cnf)){setNfs(cnf);localStorage.setItem(STORAGE_NF,JSON.stringify(cnf));count++;}
+      if(cfr&&Array.isArray(cfr)){setFretes(cfr);localStorage.setItem(STORAGE_FR,JSON.stringify(cfr));count++;}
+      if(cped&&Array.isArray(cped)&&cped.length>0){localStorage.setItem(STORAGE_PED_V2,JSON.stringify(cped));count++;}
+      if(csol&&Array.isArray(csol)&&csol.length>0){localStorage.setItem(STORAGE_SOL_V2,JSON.stringify(csol));count++;}
+      if(ccal&&typeof ccal==="object"&&Object.keys(ccal).length>0){localStorage.setItem(STORAGE_CAL_V1,JSON.stringify(ccal));count++;}
       setSyncStatus("ok");
-      setSyncMsg(`✅ NF-e sincronizadas: ${count ? "dados atualizados" : "nenhuma alteração recebida"}.`);
-      setTimeout(()=>{setSyncStatus("idle");setSyncMsg("");},3500);
+      const needsReload=count>2;
+      setSyncMsg(needsReload?"✅ Sincronizado! Recarregando...":"✅ NFs e Fretes atualizados!");
+      if(needsReload){sessionStorage.setItem("backup_just_restored","1");setTimeout(()=>window.location.reload(),2000);}
+      else setTimeout(()=>{setSyncStatus("idle");setSyncMsg("");},3000);
     }catch(err){
       setSyncStatus("error");setSyncMsg("❌ Erro: "+err.message);
       setTimeout(()=>{setSyncStatus("idle");setSyncMsg("");},4000);
@@ -1230,10 +1391,12 @@ function App(){
 }
 function doPost(e){
   try{
-    const raw=e.postData?e.postData.contents:"{}";
-    const b=JSON.parse(raw);
+    let b=e.parameter||{};
+    if(e.postData&&e.postData.type&&e.postData.type.indexOf("application/json")>=0){
+      b=JSON.parse(e.postData.contents||"{}");
+    }
     if(!b.key)return out("error:no key");
-    const val=JSON.stringify(b.value);
+    const val=typeof b.value==="string"?b.value:JSON.stringify(b.value);
     const ss=SpreadsheetApp.getActiveSpreadsheet();
     let sh=ss.getSheetByName("MasterEPI");
     if(!sh)sh=ss.insertSheet("MasterEPI");
