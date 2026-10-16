@@ -558,6 +558,9 @@ function NfTab({nfs,setNfs,fretes,setFretes,highlightNF,onHighlightDone,navegarP
   const filtered=base.filter(n=>!search||n.numero.includes(search)||n.emitente.toLowerCase().includes(search.toLowerCase())||(n.pedido||"").includes(search))
     .sort((a,b)=>{const da=parseDate(a.emissao)||parseDate(a.dataCadastro);const db=parseDate(b.emissao)||parseDate(b.dataCadastro);return sort==="oldest"?da-db:db-da;});
   const getLinked=(num)=>fretes.find(f=>f.nfAssociada&&f.nfAssociada.trim()===num.trim());
+  const alertasFrete=fretes.filter(f=>!f.chegou).map(f=>{const nf=f.nfAssociada?nfs.find(n=>n.numero.trim()===f.nfAssociada.trim()):null;const diasCte=diasAberto(f.emissao||f.dataCadastro);return{frete:f,nf,diasCte,baixaPendente:!!nf?.chegou,verificarEmail:!nf?.chegou&&diasCte>=5};});
+  const baixaPendentes=alertasFrete.filter(a=>a.baixaPendente);
+  const verificarEmail=alertasFrete.filter(a=>a.verificarEmail&&!a.baixaPendente);
 
   const handlePaste=(t)=>{setPasteText(t);setPastePreview(t.trim()?parseNFs(t):[]);};
   const handleImport=()=>{
