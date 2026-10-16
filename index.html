@@ -702,6 +702,10 @@ function NfTab({nfs,setNfs,fretes,setFretes,highlightNF,onHighlightDone,navegarP
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Buscar NF, emitente ou pedido..." style={{flex:1,minWidth:180,background:"#141414",border:"1px solid #2a2a2a",borderRadius:8,padding:"8px 14px",color:"#e2e8f0",fontSize:13}}/>
         <button onClick={()=>setSort(s=>s==="newest"?"oldest":"newest")} style={{background:"#141414",border:"1px solid #2a2a2a",borderRadius:8,padding:"8px 14px",color:"#e2e8f0",fontSize:13,cursor:"pointer",whiteSpace:"nowrap"}}>{sort==="newest"?"📅 Mais recente":"📅 Mais antigo"}</button>
       </div>
+      {(baixaPendentes.length>0||verificarEmail.length>0)&&<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:10,margin:"0 0 16px"}}>
+        {baixaPendentes.length>0&&<div style={{background:"#450a0a",border:"1px solid #ef4444",borderRadius:10,padding:"12px 14px"}}><div style={{color:"#fca5a5",fontWeight:800,fontSize:13}}>🚨 NF baixada — falta dar baixa no frete</div><div style={{color:"#fecaca",fontSize:12,marginTop:4}}>{baixaPendentes.length} frete(s) com NF já recebida. Abra o frete e clique em “Dar baixa no frete”.</div><div style={{color:"#fecaca",fontSize:11,marginTop:6}}>{baixaPendentes.slice(0,3).map(a=>`${a.frete.transportadora} · CT-e ${a.frete.nf}`).join(" | ")}</div></div>}
+        {verificarEmail.length>0&&<div style={{background:"#451a03",border:"1px solid #f59e0b",borderRadius:10,padding:"12px 14px"}}><div style={{color:"#fcd34d",fontWeight:800,fontSize:13}}>📧 Verificar e-mail / boleto</div><div style={{color:"#fde68a",fontSize:12,marginTop:4}}>{verificarEmail.length} CT-e(s) com 5 dias ou mais sem baixa. Confira se o boleto chegou.</div><div style={{color:"#fde68a",fontSize:11,marginTop:6}}>{verificarEmail.slice(0,3).map(a=>`${a.frete.transportadora} · ${a.diasCte} dias`).join(" | ")}</div></div>}
+      </div>}
       {filtered.length===0?(
         <div style={{textAlign:"center",padding:"50px 20px",color:"#475569"}}>
           <div style={{fontSize:44}}>{sub==="pendentes"?"📋":"✅"}</div>
@@ -783,7 +787,7 @@ function FretesTab({fretes,setFretes,nfs,setNfs,onChegouSync}){
   const[toast,setToast]=useState(null);
   const[nfModal,setNfModal]=useState(null);
   const[cteModal,setCteModal]=useState(null);
-  const xlsRef=useRef();
+  const[detailFrete,setDetailFrete]=useState(null);
   const xmlCteRef=useRef();
   const showToast=(m)=>{setToast(m);setTimeout(()=>setToast(null),3500);};
   const inp={width:"100%",background:"#0a0a0a",border:"1px solid #2a2a2a",borderRadius:6,padding:"8px 10px",color:"#e2e8f0",fontSize:13,boxSizing:"border-box"};
@@ -856,25 +860,6 @@ function FretesTab({fretes,setFretes,nfs,setNfs,onChegouSync}){
     });
   };
 
-  const handleXLSFiles=async(files)=>{
-    let ok=0,dups=0;
-    const exist=new Set(fretes.map(f=>f.nf.trim()));
-    for(const file of files){
-      try{
-        const items=await parseXLS_Fretes(file);
-        const novos=items.filter(f=>f.nf&&!exist.has(f.nf.trim()));
-        const dupCount=items.filter(f=>f.nf&&exist.has(f.nf.trim())).length;
-        ok+=novos.length;dups+=dupCount;
-        if(novos.length>0){
-          novos.forEach(f=>exist.add(f.nf.trim()));
-          setFretes(prev=>[...novos.map(f=>({...f,id:Date.now()+Math.random(),dataCadastro:today()})),...prev]);
-        }
-      }catch(err){showToast("❌ Erro ao ler XLS: "+err.message);}
-    }
-    if(ok>0)showToast(`✅ ${ok} frete(s) importado(s)${dups>0?" · "+dups+" duplicata(s) ignorada(s)":""}`);
-    else showToast(dups>0?"⚠️ Todos já existem!":"⚠️ Nenhum frete encontrado no arquivo.");
-  };
-
   const handleChegou=(frId,chegou)=>{
     setFretes(prev=>prev.map(f=>f.id===frId?{...f,chegou}:f));
     const fr=fretes.find(f=>f.id===frId);
@@ -917,9 +902,33 @@ function FretesTab({fretes,setFretes,nfs,setNfs,onChegouSync}){
   const finalizados=fretes.filter(f=>!!f.chegou);
   const base=sub==="pendentes"?pendentes:finalizados;
   const filtered=base.filter(f=>!search||f.transportadora.toLowerCase().includes(search.toLowerCase())||(f.nf||"").includes(search)||(f.pedido||"").includes(search)||(f.nfAssociada||"").includes(search));
+  const alertas=fretes.filter(f=>!f.chegou).map(f=>{const nf=f.nfAssociada?nfs.find(n=>n.numero.trim()===f.nfAssociada.trim()):null;const diasCte=diasAberto(f.emissao||f.dataCadastro);return{frete:f,nf,diasCte,baixaPendente:!!nf?.chegou,verificarEmail:!nf?.chegou&&diasCte>=5};});
+  const baixaPendentes=alertas.filter(a=>a.baixaPendente);
+  const verificarEmail=alertas.filter(a=>a.verificarEmail&&!a.baixaPendente);
 
   return(
     <div>
+      {detailFrete&&(
+        <div onClick={()=>setDetailFrete(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.88)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:"20px 10px"}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"#141414",border:"1px solid #cc0000",borderRadius:12,padding:24,maxWidth:760,width:"100%",maxHeight:"90vh",overflowY:"auto",boxShadow:"0 8px 40px rgba(204,0,0,0.25)"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:18}}>
+              <div><div style={{color:"#ff9999",fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Detalhes do frete</div><div style={{color:"#fff",fontSize:19,fontWeight:800,marginTop:3}}>{detailFrete.transportadora||"Transportadora não informada"}</div></div>
+              <button onClick={()=>setDetailFrete(null)} style={{background:"transparent",border:"1px solid #475569",borderRadius:6,color:"#cbd5e1",padding:"6px 12px",cursor:"pointer"}}>✕ Fechar</button>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:9}}>
+              {[
+                ["🚚 Transportadora",detailFrete.transportadora], ["📄 CT-e",detailFrete.nf], ["📅 Emissão",detailFrete.emissao],
+                ["🔗 NF vinculada",detailFrete.nfAssociada], ["🛒 Pedido",detailFrete.pedido], ["📍 Origem",detailFrete.origem],
+                ["🏁 Destino",detailFrete.destino], ["📆 Previsão",detailFrete.previsao], ["💰 Valor",detailFrete.valor],
+                ["🔎 Rastreio",detailFrete.rastreio], ["📦 Chegou em",detailFrete.chegou], ["🗓️ Cadastro",detailFrete.dataCadastro]
+              ].map(([label,value])=><div key={label} style={{background:"#0a0a0a",border:"1px solid #263244",borderRadius:8,padding:"10px 12px"}}><div style={{fontSize:10,color:"#64748b",fontWeight:700,marginBottom:4}}>{label}</div><div style={{fontSize:13,color:value?"#e2e8f0":"#475569",wordBreak:"break-word"}}>{value||"Não informado"}</div></div>)}
+            </div>
+            <div style={{marginTop:12,background:"#0a0a0a",border:"1px solid #263244",borderRadius:8,padding:"12px"}}><div style={{fontSize:10,color:"#64748b",fontWeight:700,marginBottom:5}}>📝 OBSERVAÇÕES</div><div style={{fontSize:13,color:detailFrete.obs?"#cbd5e1":"#475569",whiteSpace:"pre-wrap"}}>{detailFrete.obs||"Nenhuma observação"}</div></div>
+            {detailFrete.xmlCTe&&<div style={{marginTop:12,background:"#0d1f12",border:"1px solid #166534",borderRadius:8,padding:"12px"}}><div style={{fontSize:11,color:"#86efac",fontWeight:700,marginBottom:6}}>✅ CT-e IMPORTADO DO XML</div><div style={{fontSize:12,color:"#bbf7d0"}}>Clique no botão CT-e da tabela para consultar os dados completos do documento.</div></div>}
+            <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:18,flexWrap:"wrap"}}>{!detailFrete.chegou&&<button onClick={()=>{handleChegou(detailFrete.id,today());setDetailFrete(null);}} style={{background:"#059669",border:"none",borderRadius:7,color:"#fff",padding:"9px 16px",cursor:"pointer",fontWeight:700}}>✅ Dar baixa no frete</button>}<button onClick={()=>{setForm({...detailFrete});setEditId(detailFrete.id);setShowForm(true);setDetailFrete(null);setSub(detailFrete.chegou?"finalizados":"pendentes");}} style={{background:"#cc0000",border:"none",borderRadius:7,color:"#fff",padding:"9px 16px",cursor:"pointer",fontWeight:700}}>✏️ Editar frete</button></div>
+          </div>
+        </div>
+      )}
       {cteModal&&(
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.88)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:"20px 10px"}} onClick={()=>setCteModal(null)}>
           <div style={{background:"#141414",border:"1px solid #16a34a",borderRadius:12,padding:28,maxWidth:680,width:"100%",boxShadow:"0 8px 40px rgba(22,163,74,0.2)",maxHeight:"90vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
@@ -1052,8 +1061,6 @@ function FretesTab({fretes,setFretes,nfs,setNfs,onChegouSync}){
       <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
         <button onClick={()=>xmlCteRef.current.click()} style={{background:"#0a1a0a",color:"#86efac",border:"1px solid #16a34a",padding:"9px 18px",borderRadius:8,cursor:"pointer",fontWeight:700,fontSize:13}}>📥 Importar CT-e do Sistema (.xml)</button>
         <input ref={xmlCteRef} type="file" accept=".xml" multiple style={{display:"none"}} onChange={e=>{handleXMLCTeFiles(e.target.files);e.target.value="";}}/>
-        <button onClick={()=>xlsRef.current.click()} style={{background:"#141414",color:"#94a3b8",border:"1px solid #2a2a2a",padding:"9px 18px",borderRadius:8,cursor:"pointer",fontWeight:600,fontSize:13}}>📊 Importar XLS</button>
-        <input ref={xlsRef} type="file" accept=".xls,.xlsx,.csv" multiple style={{display:"none"}} onChange={e=>{handleXLSFiles(e.target.files);e.target.value="";}}/>
         <button onClick={()=>{setShowPaste(!showPaste);setShowForm(false);}} style={{background:showPaste?"#990000":"#1a1a1a",color:"#ff9999",border:"1px solid #cc0000",padding:"9px 18px",borderRadius:8,cursor:"pointer",fontWeight:600,fontSize:13}}>📋 Colar Lista</button>
         <button onClick={()=>{setShowForm(!showForm);setShowPaste(false);setEditId(null);setForm(FR_EMPTY);}} style={{background:"#141414",color:"#e2e8f0",border:"1px solid #2a2a2a",padding:"9px 18px",borderRadius:8,cursor:"pointer",fontWeight:600,fontSize:13}}>+ Manual</button>
       </div>
@@ -1104,59 +1111,23 @@ function FretesTab({fretes,setFretes,nfs,setNfs,onChegouSync}){
       ):(
         <div style={{overflowX:"auto"}}>
           <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
-            <thead>
-              <tr style={{background:"#141414",borderBottom:"2px solid #cc0000"}}>
-                {["Transportadora","CT-e","Emissão","Dias","NF Vinculada","Pedido","Origem → Destino","Previsão","Valor","Rastreio","Obs","Data Chegada","Status",""].map(h=>(
-                  <th key={h} style={{padding:"9px 12px",textAlign:"left",color:"#94a3b8",fontWeight:600,fontSize:12,whiteSpace:"nowrap"}}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((fr,i)=>{
-                const chegou=!!fr.chegou;
-                const dias=fr.chegou?diffDays(fr.emissao,fr.chegou):diasAberto(fr.emissao);
-                return(
-                  <tr key={fr.id} style={{borderBottom:"1px solid #1a1a1a",background:i%2===0?"#0a0a0a":"#111"}}>
-                    <td style={{padding:"9px 12px",fontWeight:600,color:"#ff4444",whiteSpace:"nowrap"}}>
-                      <div style={{display:"flex",alignItems:"center",gap:5}}>
-                        {fr.xmlCTe?<button onClick={()=>setCteModal(fr)} title="Ver detalhes CT-e" style={{background:"#0a1a0a",border:"1px solid #16a34a",borderRadius:5,padding:"3px 7px",color:"#86efac",fontSize:11,cursor:"pointer",whiteSpace:"nowrap",fontWeight:700}}>📄 CT-e</button>:null}
-                        <span>{fr.transportadora}</span>
-                      </div>
-                    </td>
-                    <td style={{padding:"9px 12px",color:"#ff9999",whiteSpace:"nowrap"}}>{fr.nf||"—"}</td>
-                    <td style={{padding:"9px 12px",color:"#94a3b8",whiteSpace:"nowrap"}}>{fr.emissao||"—"}</td>
-                    <td style={{padding:"9px 12px",textAlign:"center"}}>
-                      {fr.chegou?<span style={{background:"#0f2922",border:"1px solid #10b981",borderRadius:6,padding:"3px 9px",color:"#34d399",fontWeight:700,fontSize:12}}>{dias}d ✓</span>:<DiasBadge dias={dias}/>}
-                    </td>
-                    <td style={{padding:"9px 12px",whiteSpace:"nowrap"}}>
-                      {(()=>{
-                        const nfVinc=fr.nfAssociada?nfs.find(n=>n.numero.trim()===fr.nfAssociada.trim()):null;
-                        return(
-                          <div style={{display:"flex",alignItems:"center",gap:4}}>
-                            <LinkBadge value={fr.nfAssociada} placeholder="+ vincular NF" color="#60a5fa" bg="#1e3a5f" borderColor="#3b82f6" icon="🔗" onChange={v=>handleNfAssociada(fr.id,v)} onClear={()=>upd(fr.id,"nfAssociada","")}/>
-                            {nfVinc&&<button onClick={()=>setNfModal(nfVinc)} title="Ver detalhes da NF" style={{background:"#1e3a5f",border:"1px solid #3b82f6",borderRadius:5,padding:"3px 7px",color:"#60a5fa",fontSize:12,cursor:"pointer",whiteSpace:"nowrap"}}>👁️</button>}
-                          </div>
-                        );
-                      })()}
-                    </td>
-                    <td style={{padding:"9px 12px"}}><input value={fr.pedido||""} onChange={e=>upd(fr.id,"pedido",e.target.value)} placeholder="Pedido..." style={{background:"transparent",border:"1px solid #2a2a2a",borderRadius:5,padding:"4px 8px",color:"#fbbf24",fontSize:12,width:85}}/></td>
-                    <td style={{padding:"9px 12px",color:"#94a3b8",fontSize:12,whiteSpace:"nowrap"}}>{fr.origem&&fr.destino?`${fr.origem} → ${fr.destino}`:fr.origem||fr.destino||"—"}</td>
-                    <td style={{padding:"9px 12px",color:"#94a3b8",whiteSpace:"nowrap"}}>{fr.previsao||"—"}</td>
-                    <td style={{padding:"9px 12px",color:"#34d399",fontWeight:600,whiteSpace:"nowrap"}}>{fr.valor||"—"}</td>
-                    <td style={{padding:"9px 12px"}}><input value={fr.rastreio||""} onChange={e=>upd(fr.id,"rastreio",e.target.value)} placeholder="Rastreio..." style={{background:"transparent",border:"1px solid #2a2a2a",borderRadius:5,padding:"4px 8px",color:"#c4b5fd",fontSize:12,width:100}}/></td>
-                    <td style={{padding:"9px 12px"}}><input value={fr.obs||""} onChange={e=>upd(fr.id,"obs",e.target.value)} placeholder="Obs..." style={{background:"transparent",border:"1px solid #2a2a2a",borderRadius:5,padding:"4px 8px",color:"#94a3b8",fontSize:12,width:85}}/></td>
-                    <td style={{padding:"9px 12px",whiteSpace:"nowrap"}}><ChegouInput value={fr.chegou} onSave={v=>handleChegou(fr.id,v)}/></td>
-                    <td style={{padding:"9px 12px",whiteSpace:"nowrap"}}>
-                      {chegou?<span style={{background:"#052e16",border:"1px solid #16a34a",borderRadius:6,padding:"4px 12px",color:"#4ade80",fontWeight:700,fontSize:12}}>📦 Chegou</span>:<span style={{background:"#1c1917",border:"1px solid #f59e0b",borderRadius:6,padding:"4px 12px",color:"#fbbf24",fontWeight:700,fontSize:12}}>⏳ Pendente</span>}
-                    </td>
-                    <td style={{padding:"9px 12px",whiteSpace:"nowrap"}}>
-                      <button onClick={()=>{setForm({...fr});setEditId(fr.id);setShowForm(true);setShowPaste(false);}} style={{background:"transparent",border:"1px solid #2a2a2a",color:"#94a3b8",padding:"4px 8px",borderRadius:6,cursor:"pointer",marginRight:4,fontSize:12}}>✏️</button>
-                      <button onClick={()=>{if(confirm("Remover?"))setFretes(prev=>prev.filter(f=>f.id!==fr.id));}} style={{background:"transparent",border:"1px solid #7f1d1d",color:"#f87171",padding:"4px 8px",borderRadius:6,cursor:"pointer",fontSize:12}}>🗑️</button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
+            <thead><tr style={{background:"#141414",borderBottom:"2px solid #cc0000"}}>
+              {["Transportadora","CT-e","NF vinculada","Previsão","Dias","Status","Ações"].map(h=><th key={h} style={{padding:"10px 12px",textAlign:"left",color:"#94a3b8",fontWeight:600,fontSize:12,whiteSpace:"nowrap"}}>{h}</th>)}
+            </tr></thead>
+            <tbody>{filtered.map((fr,i)=>{
+              const chegou=!!fr.chegou;
+              const dias=fr.chegou?diffDays(fr.emissao,fr.chegou):diasAberto(fr.emissao);
+              const atrasado=!chegou&&fr.previsao&&diasAberto(fr.previsao)<0;
+              const nfVinc=fr.nfAssociada?nfs.find(n=>n.numero.trim()===fr.nfAssociada.trim()):null;
+              return <tr key={fr.id} onClick={()=>setDetailFrete(fr)} style={{borderBottom:"1px solid #1a1a1a",background:i%2===0?"#0a0a0a":"#111",cursor:"pointer"}} title="Clique para ver os detalhes">
+                <td style={{padding:"11px 12px",fontWeight:700,color:"#ff4444",whiteSpace:"nowrap"}}><div style={{display:"flex",alignItems:"center",gap:6}}>{fr.xmlCTe&&<span style={{background:"#0a1a0a",border:"1px solid #16a34a",borderRadius:5,padding:"3px 6px",color:"#86efac",fontSize:10}}>CT-e</span>}<span>{fr.transportadora||"Sem transportadora"}</span></div><div style={{fontSize:10,color:"#64748b",marginTop:3}}>{fr.origem&&fr.destino?`${fr.origem} → ${fr.destino}`:"Rota não informada"}</div></td>
+                <td style={{padding:"11px 12px",color:"#ff9999",whiteSpace:"nowrap"}}>{fr.nf||"—"}<div style={{fontSize:10,color:"#64748b",marginTop:3}}>{fr.emissao||"Sem emissão"}</div></td>
+                <td style={{padding:"11px 12px",whiteSpace:"nowrap"}}>{nfVinc?<button onClick={e=>{e.stopPropagation();setNfModal(nfVinc)}} style={{background:"#1e3a5f",border:"1px solid #3b82f6",borderRadius:5,padding:"4px 8px",color:"#93c5fd",cursor:"pointer"}}>🔗 {fr.nfAssociada}</button>:<span style={{color:"#f59e0b",fontSize:12}}>⚠️ Não vinculada</span>}</td>
+                <td style={{padding:"11px 12px",color:atrasado?"#f87171":"#94a3b8",fontWeight:atrasado?700:400,whiteSpace:"nowrap"}}>{fr.previsao||"—"}{atrasado&&<div style={{fontSize:10}}>Atrasado</div>}</td>
+                <td style={{padding:"11px 12px",whiteSpace:"nowrap"}}>{chegou?<span style={{color:"#34d399",fontWeight:700}}>{dias}d ✓</span>:<DiasBadge dias={dias}/>}</td>
+                <td style={{padding:"11px 12px",whiteSpace:"nowrap"}}>{chegou?<span style={{background:"#052e16",border:"1px solid #16a34a",borderRadius:6,padding:"4px 10px",color:"#4ade80",fontWeight:700,fontSize:12}}>📦 Chegou</span>:(()=>{const al=alertas.find(a=>a.frete.id===fr.id);return al?.baixaPendente?<span style={{background:"#450a0a",border:"1px solid #ef4444",borderRadius:6,padding:"4px 10px",color:"#f87171",fontWeight:700,fontSize:12}}>🚨 Dar baixa</span>:al?.verificarEmail?<span style={{background:"#451a03",border:"1px solid #f59e0b",borderRadius:6,padding:"4px 10px",color:"#fcd34d",fontWeight:700,fontSize:12}}>📧 Verificar e-mail</span>:<span style={{background:atrasado?"#450a0a":"#1c1917",border:`1px solid ${atrasado?"#ef4444":"#f59e0b"}`,borderRadius:6,padding:"4px 10px",color:atrasado?"#f87171":"#fbbf24",fontWeight:700,fontSize:12}}>{atrasado?"⚠️ Atrasado":"⏳ Pendente"}</span>})()}</td>
+                <td style={{padding:"11px 12px",whiteSpace:"nowrap"}}><button onClick={e=>{e.stopPropagation();setDetailFrete(fr)}} style={{background:"transparent",border:"1px solid #334155",color:"#cbd5e1",padding:"5px 8px",borderRadius:6,cursor:"pointer",marginRight:4}}>👁️</button><button onClick={e=>{e.stopPropagation();setForm({...fr});setEditId(fr.id);setShowForm(true);setShowPaste(false);}} style={{background:"transparent",border:"1px solid #2a2a2a",color:"#94a3b8",padding:"5px 8px",borderRadius:6,cursor:"pointer"}}>✏️</button></td>
+              </tr>})}</tbody>
           </table>
         </div>
       )}
